@@ -10,7 +10,6 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -40,6 +39,9 @@ with contrib/ksesh_agents.py, in kitty's tab bar and desktop notifications.`,
 		newAgentNextCommand(base),
 		newAgentLastCommand(base),
 		newAgentFocusCommand(base),
+		newAgentShowCommand(base),
+		newAgentSendCommand(base),
+		newAgentPathCommand(base),
 		newAgentInstallCommand(),
 		newAgentUninstallCommand(),
 	)
@@ -160,12 +162,11 @@ func newAgentListCommand(base *BaseDeps) *cobra.Command {
 			}
 			noColor, _ := cmd.Flags().GetBool("no-color")
 			withIDs, _ := cmd.Flags().GetBool("ids")
-			for _, a := range agents {
-				line := agentLine(a, time.Now(), !noColor)
+			for i, row := range agentRows(agents, time.Now(), !noColor) {
 				if withIDs {
-					line = strconv.Itoa(a.WindowID) + "\t" + line
+					row = strconv.Itoa(agents[i].WindowID) + "\t" + row
 				}
-				fmt.Fprintln(cmd.OutOrStdout(), line)
+				fmt.Fprintln(cmd.OutOrStdout(), row)
 			}
 			return nil
 		},
@@ -185,10 +186,9 @@ func newAgentFocusCommand(base *BaseDeps) *cobra.Command {
 			"line of 'ksesh agent list --ids', so an fzf selection can be passed as is.",
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			field, _, _ := strings.Cut(strings.TrimSpace(args[0]), "\t")
-			id, err := strconv.Atoi(strings.TrimSpace(field))
+			id, err := windowIDArg(args[0])
 			if err != nil {
-				return fmt.Errorf("not a window id: %q", args[0])
+				return err
 			}
 			deps, err := buildDeps(cmd, base)
 			if err != nil {
@@ -197,35 +197,6 @@ func newAgentFocusCommand(base *BaseDeps) *cobra.Command {
 			return deps.Kitty.FocusWindow(id)
 		},
 	}
-}
-
-// agentLine renders one agent for 'ksesh agent list':
-//
-//	waiting  4m  api › 2 claude      Needs permission: Bash
-func agentLine(a *model.Agent, now time.Time, color bool) string {
-	status := agent.Status(a.Status)
-	icn := " "
-	if g, ok := agent.GlyphFor(status); ok {
-		icn = g.Icon
-		if color {
-			icn = fmt.Sprintf("\033[%dm%s\033[39m", g.ColorCode, g.Icon)
-		}
-	}
-	where := a.Session
-	if a.TabTitle != "" {
-		if where != "" {
-			where += " › "
-		}
-		where += a.TabTitle
-	}
-	if where == "" {
-		where = "window " + strconv.Itoa(a.WindowID)
-	}
-	detail := a.Message
-	if detail == "" || status == agent.Working {
-		detail = a.Prompt
-	}
-	return strings.TrimRight(fmt.Sprintf("%s %-7s %4s  %-28s %s", icn, status, Age(a.Since, now), where, detail), " ")
 }
 
 // Age renders how long an agent has been in its status, in its largest unit.

@@ -115,3 +115,16 @@ func TestFocusWindowInTheCurrentSession(t *testing.T) {
 
 	require.NoError(t, k.FocusWindow(2))
 }
+
+func TestSendTextAndKeys(t *testing.T) {
+	k, mShell := newAgentKitty(t, "")
+	mShell.EXPECT().CmdCapture("kitten", "@", "send-text", "--match", "id:2", "--", `use C:\\tmp\r`).Return("", nil)
+	mShell.EXPECT().CmdCapture("kitten", "@", "send-key", "--match", "id:2", "enter").Return("", nil)
+	mShell.EXPECT().CmdCapture("kitten", "@", "get-text", "--ansi", "--match", "id:2").Return("screen", nil)
+
+	require.NoError(t, k.SendText(2, `use C:\tmp`, true))
+	require.NoError(t, k.SendKey(2, "enter"))
+	screen, err := k.CaptureWindow(2)
+	require.NoError(t, err)
+	assert.Equal(t, "screen", screen)
+}

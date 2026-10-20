@@ -38,21 +38,34 @@ func TestAgentInstallKeepsEveryBackup(t *testing.T) {
 	assert.Contains(t, string(updated), "/bin/ksesh agent hook")
 }
 
-func TestAgentLine(t *testing.T) {
+func TestAgentRows(t *testing.T) {
 	now := time.Unix(1_700_000_000, 0)
 	since := now.Add(-4 * time.Minute)
-	line := agentLine(&model.Agent{
-		WindowID: 3, Session: "api", TabTitle: "2", Status: "waiting", Since: &since,
-		Message: "Needs permission: Bash", Prompt: "fix it",
-	}, now, false)
-	assert.Contains(t, line, "waiting")
-	assert.Contains(t, line, "4m")
-	assert.Contains(t, line, "api › 2")
-	assert.True(t, strings.HasSuffix(line, "Needs permission: Bash"))
+	agents := []*model.Agent{
+		{WindowID: 3, Session: "api", TabTitle: "✳ Fix login", Status: "waiting", Since: &since,
+			Message: "Needs permission: Bash", Prompt: "fix it"},
+		{WindowID: 9, Status: "working", Message: "old", Prompt: "fix it"},
+		{WindowID: 5, Session: "web", TabTitle: "claude", Status: "idle"},
+	}
 
-	working := agentLine(&model.Agent{WindowID: 9, Status: "working", Message: "old", Prompt: "fix it"}, now, false)
-	assert.Contains(t, working, "window 9")
-	assert.True(t, strings.HasSuffix(working, "fix it"), "working shows the prompt it works on")
+	plain := agentRows(agents, now, false)
+	assert.Contains(t, plain[0], "waiting  api › Fix login   4m  Needs permission: Bash", "aligned, without Claude's title glyph")
+	assert.True(t, strings.HasSuffix(plain[1], "fix it"), "working shows the prompt it works on")
+	assert.Contains(t, plain[1], "window 9")
+	assert.Contains(t, plain[2], "idle", "without color the status is spelled out")
+
+	colored := agentRows(agents, now, true)
+	assert.NotContains(t, colored[2], "idle", "the dimmed gray circle says it")
+	assert.True(t, strings.HasPrefix(colored[2], "\033[2m"))
+	assert.True(t, strings.HasPrefix(colored[0], "\033[33m"))
+}
+
+func TestWindowIDArg(t *testing.T) {
+	id, err := windowIDArg("42\t waiting api")
+	require.NoError(t, err)
+	assert.Equal(t, 42, id)
+	_, err = windowIDArg("api")
+	assert.Error(t, err)
 }
 
 func TestAge(t *testing.T) {
@@ -62,4 +75,9 @@ func TestAge(t *testing.T) {
 	assert.Equal(t, "30s", Age(ago(30*time.Second), now))
 	assert.Equal(t, "2h", Age(ago(2*time.Hour+5*time.Minute), now))
 	assert.Equal(t, "3d", Age(ago(72*time.Hour), now))
+}
+
+func TestAgentRowsWithOnlyIdleAgentsHaveNoStatusColumn(t *testing.T) {
+	rows := agentRows([]*model.Agent{{WindowID: 1, Session: "api", TabTitle: "claude", Status: "idle"}}, time.Now(), true)
+	assert.Equal(t, "\033[2m  api › claude\033[22m", rows[0])
 }

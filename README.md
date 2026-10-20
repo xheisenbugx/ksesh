@@ -151,7 +151,28 @@ ksesh agent list -A          # only waiting, failed or done
 ksesh agent next             # go to the one waiting longest; again for the next
 ksesh agent last             # back to the agent you were with before
 ksesh agent set done -m "…"  # report a status by hand or from another agent
+ksesh agent send 42 --key enter --if-status waiting  # approve without switching
+ksesh agent send 42 "use the existing helper"         # reply without switching
+ksesh agent show 42          # status, branch, changes and screen of window 42
 ```
+
+[`contrib/ksesh-agents-fzf`](contrib/ksesh-agents-fzf) is a live picker over
+them (it refreshes every 2 seconds), with the agent's screen, or its git diff,
+on the right, from which most things you'd switch to an agent for can be done
+in place:
+
+| key      | does                                                    |
+| -------- | ------------------------------------------------------- |
+| `enter`  | go to the agent                                         |
+| `ctrl-y` | approve: enter in a waiting agent's permission prompt   |
+| `ctrl-x` | interrupt a working agent, deny a waiting one (escape)  |
+| `ctrl-o` | reply: type a message and send it                       |
+| `ctrl-s` | mark seen (back to idle)                                |
+| `ctrl-g` | preview the git diff instead of the screen, and back    |
+| `ctrl-a` | only the agents that need you, and back                 |
+| `alt-n`  | new worktree + agent in the selected agent's repo       |
+| `alt-b`  | open the branch's pull request                          |
+| `alt-w`  | close the agent's window (asks first)                   |
 
 The status also shows wherever sessions do: `ksesh list -i`, `ksesh-fzf` and
 the picker draw a session's most urgent agent status in place of its kitty

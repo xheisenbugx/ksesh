@@ -88,3 +88,20 @@ func TestStatusPriority(t *testing.T) {
 	_, ok := Parse("busy")
 	assert.False(t, ok)
 }
+
+func TestCleanTitle(t *testing.T) {
+	assert.Equal(t, "Claude Code", CleanTitle("✳ Claude Code"))
+	assert.Equal(t, "Fix the build", CleanTitle("⠂ Fix the build"))
+	assert.Equal(t, "~/c/api", CleanTitle("~/c/api"), "a path keeps its tilde")
+	assert.Equal(t, "✳", CleanTitle("✳"), "nothing left means nothing to clean")
+}
+
+func TestSortGroupsAgentsWithoutTimesBySession(t *testing.T) {
+	list := []*model.Agent{
+		{WindowID: 1, Status: "idle", Session: "web", TabTitle: "b"},
+		{WindowID: 2, Status: "idle", Session: "api", TabTitle: "✳ z"},
+		{WindowID: 3, Status: "idle", Session: "api", TabTitle: "a"},
+	}
+	Sort(list)
+	assert.Equal(t, []int{3, 2, 1}, ids(list))
+}

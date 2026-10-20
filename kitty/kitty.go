@@ -89,6 +89,12 @@ type Kitty interface {
 	FocusWindow(windowID int) error
 	// CurrentWindowID is the window the user is in.
 	CurrentWindowID() (int, error)
+	// SendText types text into a window, pressing enter after it if asked.
+	SendText(windowID int, text string, enter bool) error
+	// SendKey presses keys (enter, escape, ctrl+c, …) in a window.
+	SendKey(windowID int, keys ...string) error
+	// CaptureWindow returns a window's screen.
+	CaptureWindow(windowID int) (string, error)
 	// Freeze and Thaw bracket a TUI: see freeze.go.
 	Freeze(captures bool) error
 	Thaw() error

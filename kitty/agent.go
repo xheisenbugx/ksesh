@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"slices"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/xheisenbugx/ksesh/agent"
@@ -160,4 +161,30 @@ func (k *RealKitty) CurrentWindowID() (int, error) {
 		return 0, err
 	}
 	return st.currentID, nil
+}
+
+// SendText types text into a window, and presses enter after it when enter is
+// set: how a reply reaches an agent without switching to it.
+func (k *RealKitty) SendText(windowID int, text string, enter bool) error {
+	// send-text decodes backslash escapes, so literal backslashes are doubled
+	// and \r is the enter key.
+	escaped := strings.ReplaceAll(text, `\`, `\\`)
+	if enter {
+		escaped += `\r`
+	}
+	_, err := k.rc("send-text", "--match", "id:"+strconv.Itoa(windowID), "--", escaped)
+	return err
+}
+
+// SendKey presses keys (kitty key names: enter, escape, ctrl+c, 1, …) in a
+// window, one after the other.
+func (k *RealKitty) SendKey(windowID int, keys ...string) error {
+	args := append([]string{"send-key", "--match", "id:" + strconv.Itoa(windowID)}, keys...)
+	_, err := k.rc(args...)
+	return err
+}
+
+// CaptureWindow returns a window's screen, with its colors.
+func (k *RealKitty) CaptureWindow(windowID int) (string, error) {
+	return k.rc("get-text", "--ansi", "--match", "id:"+strconv.Itoa(windowID))
 }

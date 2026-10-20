@@ -2,7 +2,9 @@ package agent
 
 import (
 	"slices"
+	"strings"
 	"time"
+	"unicode"
 
 	"github.com/xheisenbugx/ksesh/model"
 )
@@ -16,8 +18,28 @@ func Sort(agents []*model.Agent) {
 		if pa != pb {
 			return pb - pa
 		}
-		return since(a).Compare(since(b))
+		if c := since(a).Compare(since(b)); c != 0 {
+			return c
+		}
+		// Agents with no time to go by stay grouped by where they are.
+		if c := strings.Compare(a.Session, b.Session); c != 0 {
+			return c
+		}
+		return strings.Compare(CleanTitle(a.TabTitle), CleanTitle(b.TabTitle))
 	})
+}
+
+// CleanTitle drops the status glyph agents put in front of their window title
+// (Claude Code's "✳ " or spinner frame), which ksesh shows as an icon of its
+// own.
+func CleanTitle(title string) string {
+	trimmed := strings.TrimLeftFunc(title, func(r rune) bool {
+		return unicode.IsSpace(r) || (r > unicode.MaxASCII && (unicode.IsSymbol(r) || r == '·' || (r >= 0x2800 && r <= 0x28ff)))
+	})
+	if trimmed == "" {
+		return title
+	}
+	return trimmed
 }
 
 func since(a *model.Agent) time.Time {
