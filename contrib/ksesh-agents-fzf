@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+# fzf picker over the coding agents running in kitty, the ones that need you
+# first, with the agent's screen on the right; enter goes to it.
+#
+# Install: copy this file to ~/.config/kitty/, make it executable, and add to
+# kitty.conf:
+#
+#   map super+a launch --type=overlay --cwd=current ~/.config/kitty/ksesh-agents-fzf
+#
+# Needs listen_on in kitty.conf, like ksesh-fzf.
+set -euo pipefail
+
+selection="$(
+  ksesh agent list --ids | fzf \
+    --ansi --no-sort --delimiter '\t' --with-nth 2 \
+    --border rounded --border-label ' agents ' --prompt '  ' \
+    --header '  ^r reload  ^a only the ones that need you' \
+    --bind 'tab:down,btab:up' \
+    --bind 'ctrl-r:reload(ksesh agent list --ids)' \
+    --bind 'ctrl-a:reload(ksesh agent list --ids --attention)' \
+    --preview-window 'right:55%' \
+    --preview 'kitten @ get-text --ansi --match id:{1}'
+)" || exit 0
+
+[ -z "$selection" ] || exec ksesh agent focus "$selection"

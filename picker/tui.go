@@ -12,6 +12,7 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/sahilm/fuzzy"
 
+	"github.com/xheisenbugx/ksesh/agent"
 	"github.com/xheisenbugx/ksesh/icon"
 	"github.com/xheisenbugx/ksesh/model"
 )
@@ -248,7 +249,15 @@ func srcIcon(src string) (string, color.Color) {
 // others — and nothing in a TUI can ask the terminal which it did. A trailing
 // space makes up the difference for that one icon without shifting any other
 // row.
+//
+// A kitty session whose agents report a status shows that instead, colored by
+// it, so a session waiting on you stands out without reading its name.
 func (m Model) iconCell(item sessionItem) string {
+	if item.src == kittySrc {
+		if g, ok := agent.GlyphFor(agent.Status(item.session.AgentStatus)); ok {
+			return icon.StatusCell(g.Icon, g.ColorCode, m.iconWidth)
+		}
+	}
 	return icon.Cell(item.icon, item.src, m.iconWidth)
 }
 

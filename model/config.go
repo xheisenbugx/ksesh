@@ -235,15 +235,18 @@ type (
 	// `sesh worktree connect <number>` knows where to add worktrees, how to
 	// name their branches, and what to run on connect.
 	WorktreeConfig struct {
-		Repo           string `toml:"repo"`            // GitHub "org/repo"
-		Path           string `toml:"path"`            // local repo root (supports ~)
-		WorktreeDir    string `toml:"worktree_dir"`    // default ".wk"; relative to Path or absolute
-		BranchTemplate string `toml:"branch_template"` // default "{number}"
-		BaseBranch     string `toml:"base_branch"`     // default "origin/main"
-		Fetch          *bool  `toml:"fetch"`           // default true (nil => true)
-		StartupCommand string `toml:"startup_command"` // runs when connecting to a worktree that already existed
-		CreateCommand  string `toml:"create_command"`  // runs instead, on the connect that creates the worktree
-		Icon           string `toml:"icon"`
+		Repo           string   `toml:"repo"`            // GitHub "org/repo"
+		Path           string   `toml:"path"`            // local repo root (supports ~)
+		WorktreeDir    string   `toml:"worktree_dir"`    // default ".wk"; relative to Path or absolute
+		BranchTemplate string   `toml:"branch_template"` // default "{number}"
+		BaseBranch     string   `toml:"base_branch"`     // default "origin/main"
+		Fetch          *bool    `toml:"fetch"`           // default true (nil => true)
+		StartupCommand string   `toml:"startup_command"` // runs when connecting to a worktree that already existed
+		CreateCommand  string   `toml:"create_command"`  // runs instead, on the connect that creates the worktree
+		Copy           []string `toml:"copy"`            // files/globs copied into a worktree `worktree new` creates
+		Symlink        []string `toml:"symlink"`         // files/globs symlinked into it instead
+		AgentCommand   string   `toml:"agent_command"`   // what `worktree new --agent` runs; default "claude"
+		Icon           string   `toml:"icon"`
 	}
 
 	// BrowserConfig configures reading the active browser tab's URL so

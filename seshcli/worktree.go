@@ -21,6 +21,9 @@ func NewWorktreeCommand(base *BaseDeps) *cobra.Command {
 	cmd.AddCommand(newWorktreeListCommand(base))
 	cmd.AddCommand(newWorktreePickerCommand(base))
 	cmd.AddCommand(newWorktreeBrowseCommand(base))
+	cmd.AddCommand(newWorktreeNewCommand(base))
+	cmd.AddCommand(newWorktreeStatusCommand(base))
+	cmd.AddCommand(newWorktreeRemoveCommand(base))
 	return cmd
 }
 

@@ -431,6 +431,21 @@
             "type": "string",
             "description": "Shell command to run instead of startup_command on the connect that creates the worktree"
           },
+          "copy": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "Files or globs, relative to the repo root, copied into a worktree `ksesh worktree new` creates (e.g. .env). A .worktreeinclude file at the repo root adds to them."
+          },
+          "symlink": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "Files, directories or globs, relative to the repo root, symlinked into a worktree `ksesh worktree new` creates (e.g. node_modules)"
+          },
+          "agent_command": {
+            "type": "string",
+            "description": "Agent `ksesh worktree new --agent` starts when no command is given",
+            "default": "claude"
+          },
           "icon": {
             "type": "string",
             "description": "Icon shown for every session under this repo's worktree root, in the picker and `ksesh list --json`/`ksesh worktree list --json`. Any string: a nerd font glyph or an emoji."

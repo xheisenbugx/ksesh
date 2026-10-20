@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/xheisenbugx/ksesh/agent"
 	"github.com/xheisenbugx/ksesh/ansi"
 	"github.com/xheisenbugx/ksesh/model"
 )
@@ -49,21 +50,39 @@ func ansiString(code int, s string) string {
 	return fmt.Sprintf("\033[%dm%s\033[39m", code, s)
 }
 
+// glyphFor is the icon a session is listed with: its agents' status when
+// there is one, so a session waiting on you stands out in the list, and its
+// source otherwise.
+func glyphFor(s model.SeshSession) (Glyph, bool) {
+	if s.Src == "kitty" {
+		if g, ok := agent.GlyphFor(agent.Status(s.AgentStatus)); ok {
+			return Glyph{Icon: g.Icon, ColorCode: g.ColorCode}, true
+		}
+	}
+	g, ok := Glyphs[s.Src]
+	return g, ok
+}
+
 func (i *RealIcon) AddIcon(s model.SeshSession) string {
-	if g, ok := Glyphs[s.Src]; ok {
+	if g, ok := glyphFor(s); ok {
 		return fmt.Sprintf("%s %s", ansiString(g.ColorCode, g.Icon), s.Name)
 	}
 	return s.Name
 }
 
 func (i *RealIcon) AddIconNoColor(s model.SeshSession) string {
-	if g, ok := Glyphs[s.Src]; ok {
+	if g, ok := glyphFor(s); ok {
 		return fmt.Sprintf("%s %s", g.Icon, s.Name)
 	}
 	return s.Name
 }
 
 func (i *RealIcon) RemoveIcon(name string) string {
+	for _, status := range agent.Icons() {
+		if rest, ok := strings.CutPrefix(name, status+" "); ok {
+			return rest
+		}
+	}
 	if strings.HasPrefix(name, kittyIcon) || strings.HasPrefix(name, zoxideIcon) || strings.HasPrefix(name, configIcon) || strings.HasPrefix(name, sessionfileIcon) || strings.HasPrefix(name, kittyWindowIcon) {
 		return name[4:]
 	}

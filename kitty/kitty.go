@@ -21,6 +21,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/xheisenbugx/ksesh/agent"
 	"github.com/xheisenbugx/ksesh/model"
 	"github.com/xheisenbugx/ksesh/oswrap"
 	"github.com/xheisenbugx/ksesh/shell"
@@ -79,6 +80,15 @@ type Kitty interface {
 	// created its session.
 	StartKitty(startDir string) (int, error)
 	CloseWindow(windowID int) error
+	// SetAgentStatus writes an agent's status onto a window, the one ksesh
+	// runs in when windowID is 0.
+	SetAgentStatus(windowID int, u agent.Update) error
+	// ListAgents lists the agents running in kitty windows.
+	ListAgents() ([]*model.Agent, error)
+	// FocusWindow switches to a window, through its session.
+	FocusWindow(windowID int) error
+	// CurrentWindowID is the window the user is in.
+	CurrentWindowID() (int, error)
 	// Freeze and Thaw bracket a TUI: see freeze.go.
 	Freeze(captures bool) error
 	Thaw() error

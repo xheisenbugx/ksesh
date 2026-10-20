@@ -53,3 +53,44 @@ type WindowConnectOpts struct {
 	Background bool // create without selecting it or moving the client
 	Switch     bool // switch rather than attach, for triggers outside kitty
 }
+
+// WorktreeNewOpts describes a branch worktree for `ksesh worktree new`.
+type WorktreeNewOpts struct {
+	Branch string
+	Base   string // ref a new branch starts from; empty picks the default
+	Fetch  bool   // fetch before creating, even without a [[worktree]] block
+	// StartAgent starts an agent in the session: Agent, or the repo's
+	// agent_command when empty, given Prompt as its first prompt.
+	StartAgent bool
+	Agent      string
+	Prompt     string
+	Switch     bool
+}
+
+// GitWorktree is one entry of `git worktree list`, with its state when asked
+// for.
+type GitWorktree struct {
+	Path     string `json:"path"`
+	Branch   string `json:"branch,omitempty"` // short name; empty when detached
+	Head     string `json:"head"`
+	Main     bool   `json:"main"`
+	Detached bool   `json:"detached"`
+	Repo     string `json:"repo"` // the main worktree, which git commands run in
+	// Base is what Ahead and Behind count against.
+	Base      string `json:"base,omitempty"`
+	Ahead     int    `json:"ahead"`
+	Behind    int    `json:"behind"`
+	Staged    int    `json:"staged"`
+	Unstaged  int    `json:"unstaged"`
+	Untracked int    `json:"untracked"`
+	// Reason is why `worktree rm` picked it: "merged", "gone" or "".
+	Reason string `json:"reason,omitempty"`
+}
+
+// WorktreeRemoveOpts selects the worktrees `ksesh worktree rm` removes.
+type WorktreeRemoveOpts struct {
+	// Targets are worktree paths, directory names or branches.
+	Targets []string
+	Merged  bool // every worktree whose branch is merged into the base
+	Gone    bool // every worktree whose branch's upstream was deleted
+}
