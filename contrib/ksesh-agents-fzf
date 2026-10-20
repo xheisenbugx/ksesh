@@ -9,7 +9,11 @@
 #   ctrl-x  interrupt a working agent, or deny a waiting one (escape)
 #   ctrl-o  reply: type a message and send it to the agent
 #   ctrl-s  mark seen: back to idle, off the attention list
-#   ctrl-g  preview the agent's git diff instead of its screen, and back
+#   ctrl-g  preview what the agent did instead of its screen, and back: its
+#           branch against the base, commits, files (● not committed yet) and
+#           diff, with generated-size files folded
+#   alt-d   the same review full screen, everything unfolded, in less
+#   ctrl-d  scroll the preview down half a page (ctrl-u up)
 #   ctrl-a  only the agents that need you, and back to all of them
 #   alt-n   new worktree + agent in the selected agent's repo
 #   alt-b   open the pull request of the agent's branch in the browser
@@ -45,23 +49,19 @@ toggle)
   fi
   exit 0
   ;;
+tick)
+  # The 2-second refresh. While the diff is up it does nothing: rerunning it
+  # would throw you back to its top in the middle of reading.
+  [[ "${FZF_PREVIEW_LABEL:-}" == *diff* ]] || echo "reload-sync($self list)+refresh-preview"
+  exit 0
+  ;;
 preview)
   # ctrl-g: swap the preview between the screen and the git diff.
   if [[ "${FZF_PREVIEW_LABEL:-}" == *diff* ]]; then
     echo "change-preview-label( screen )+change-preview-window(~4,follow)+change-preview(ksesh agent show {1})"
   else
-    echo "change-preview-label( diff )+change-preview-window(~0,nofollow)+change-preview($self diff {1})"
+    echo "change-preview-label( diff )+change-preview-window(~0,nofollow)+change-preview(ksesh agent diff {1} --width \$FZF_PREVIEW_COLUMNS --max-file-lines 200)"
   fi
-  exit 0
-  ;;
-diff)
-  dir="$(ksesh agent path "$2")" || exit 0
-  cd "$dir"
-  git -c color.ui=always status --short --branch
-  echo
-  git --no-pager diff HEAD --stat --color=always
-  echo
-  git --no-pager diff HEAD --color=always
   exit 0
   ;;
 reply)
@@ -115,12 +115,12 @@ cleanup() {
 }
 trap cleanup EXIT
 
-# Keep the list and the preview live: statuses change while you look. --id-nth
-# keeps the cursor on the same agent across reloads.
+# Keep the list and the screen preview live: statuses change while you look.
+# --id-nth keeps the cursor on the same agent across reloads.
 (
   while sleep 2; do
     [ -S "$sock" ] || continue
-    curl -s --unix-socket "$sock" -X POST http://localhost -d "reload-sync($self list)+refresh-preview" >/dev/null || exit 0
+    curl -s --unix-socket "$sock" -X POST http://localhost -d "transform($self tick)" >/dev/null || exit 0
   done
 ) &
 refresher=$!
@@ -130,7 +130,7 @@ refresher=$!
   --ansi --no-sort --layout reverse --delimiter '\t' --with-nth 2 \
   --border rounded --border-label ' agents ' --info inline-right \
   --prompt 'all › ' --ghost 'filter by session, title or message' \
-  --footer $'enter go  ^y approve  ^x interrupt/deny  ^o reply  ^s seen  ^g diff  ^a needs you\nalt-n new worktree  alt-b PR  alt-w close  ^/ preview  esc quit' \
+  --footer $'enter go  ^y approve  ^x interrupt/deny  ^o reply  ^s seen  ^a needs you\n^g diff  alt-d full review  ^d/^u scroll  alt-n new worktree  alt-b PR  alt-w close  esc quit' \
   --bind 'tab:down,btab:up' \
   --bind 'enter:become(ksesh agent focus {1})' \
   --bind "ctrl-y:execute-silent(ksesh agent send {1} --key enter --if-status waiting)+reload-sync($self list)" \
@@ -138,6 +138,8 @@ refresher=$!
   --bind "ctrl-o:execute($self reply {1})+reload-sync($self list)" \
   --bind "ctrl-s:execute-silent(ksesh agent set idle --window {1})+reload-sync($self list)" \
   --bind "ctrl-g:transform($self preview)" \
+  --bind 'alt-d:execute(ksesh agent diff {1} --width $FZF_COLUMNS | less -R)' \
+  --bind 'ctrl-d:preview-half-page-down,ctrl-u:preview-half-page-up' \
   --bind "ctrl-a:transform($self toggle)" \
   --bind "alt-n:become($self new {1})" \
   --bind "alt-b:execute-silent($self pr {1})" \

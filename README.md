@@ -154,7 +154,15 @@ ksesh agent set done -m "…"  # report a status by hand or from another agent
 ksesh agent send 42 --key enter --if-status waiting  # approve without switching
 ksesh agent send 42 "use the existing helper"         # reply without switching
 ksesh agent show 42          # status, branch, changes and screen of window 42
+ksesh agent diff 42          # review it: branch vs base, commits, files, diff
 ```
+
+`ksesh agent diff` reviews the agent's worktree the way its branch will be
+reviewed: everything since it left its base (origin's default branch), so
+commits, uncommitted changes and new files alike, with the files not committed
+yet marked `●`. The diff is drawn with line numbers and tinted backgrounds, and
+goes through [delta](https://github.com/dandavison/delta) instead when it is
+installed.
 
 [`contrib/ksesh-agents-fzf`](contrib/ksesh-agents-fzf) is a live picker over
 them (it refreshes every 2 seconds), with the agent's screen, or its git diff,
@@ -168,7 +176,9 @@ in place:
 | `ctrl-x` | interrupt a working agent, deny a waiting one (escape)  |
 | `ctrl-o` | reply: type a message and send it                       |
 | `ctrl-s` | mark seen (back to idle)                                |
-| `ctrl-g` | preview the git diff instead of the screen, and back    |
+| `ctrl-g` | preview the review (`ksesh agent diff`) instead of the screen, and back; files with hundreds of changed lines are folded |
+| `alt-d`  | the full review in `less`, nothing folded               |
+| `ctrl-d` | scroll the preview half a page down (`ctrl-u` up)       |
 | `ctrl-a` | only the agents that need you, and back                 |
 | `alt-n`  | new worktree + agent in the selected agent's repo       |
 | `alt-b`  | open the branch's pull request                          |
