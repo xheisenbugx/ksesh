@@ -1,0 +1,62 @@
+package model
+
+import "time"
+
+type (
+	SeshSessions struct {
+		// catalog of the sessions
+		Directory SeshSessionMap
+		// unique identifiers of the sessions ordered
+		OrderedIndex []string
+	}
+
+	SeshSessionMap map[string]SeshSession
+	SeshWindowMap  map[string]WindowConfig
+
+	SeshSession struct {
+		Src  string // The source of the session (config, kitty, zoxide, sessionfile)
+		Name string // The display name
+		Path string // The absolute directory path
+
+		StartupCommand        string         // The command to run when the session is started
+		PreviewCommand        string         // The command to run when the session is previewed
+		DisableStartupCommand bool           // Ignore the default startup command if present
+		SessionFile           string         // Path of the kitty session file that starts it
+		Attached              int            // Whether the session is currently attached
+		Windows               int            // The number of windows in the session
+		WindowConfigs         []WindowConfig // The windows used in session config
+		WindowNames           []string       // The names of the windows in session config
+		Score                 float64        // The score of the session (from Zoxide)
+		Icon                  string         // The configured icon, resolved from session name, path, or wildcard
+		Alias                 string         // The alias of the session in config
+		AliasAutoConnect      bool           // Whether typing the alias connects without enter
+		Wildcard              string         // The [[wildcard]] pattern matching the session path
+		KittyTabs             []KittyTab     // The live tabs of a kitty session
+		Worktree              *WorktreeInfo  // The [[worktree]] issue the session path is under
+
+		// Group is the index of the sort_order block this session was listed
+		// under. Sessions sharing one are contiguous in OrderedIndex, which is
+		// what the picker draws its group separator from. It is not part of
+		// `sesh list --json`: it describes the list, not the session.
+		Group int `json:"-"`
+
+		Created      *time.Time // Session creation time
+		LastAttached *time.Time // Last attach time
+		Activity     *time.Time // Last activity time
+		Alerts       []string   // Active alerts (e.g. bell, activity)
+	}
+
+	WorktreeInfo struct {
+		Repo   string
+		Number int
+		Title  string
+		State  string
+	}
+
+	SeshSrcs struct {
+		Config      bool
+		Kitty       bool
+		SessionFile bool
+		Zoxide      bool
+	}
+)

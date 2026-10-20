@@ -1,0 +1,193 @@
+package seshcli
+
+import (
+	"errors"
+	"fmt"
+	"log/slog"
+
+	"github.com/spf13/cobra"
+
+	"github.com/xheisenbugx/ksesh/browser"
+	"github.com/xheisenbugx/ksesh/cache"
+	"github.com/xheisenbugx/ksesh/cloner"
+	"github.com/xheisenbugx/ksesh/configurator"
+	"github.com/xheisenbugx/ksesh/connector"
+	"github.com/xheisenbugx/ksesh/dir"
+	"github.com/xheisenbugx/ksesh/execwrap"
+	"github.com/xheisenbugx/ksesh/focuser"
+	"github.com/xheisenbugx/ksesh/formatter"
+	"github.com/xheisenbugx/ksesh/git"
+	"github.com/xheisenbugx/ksesh/github"
+	"github.com/xheisenbugx/ksesh/home"
+	"github.com/xheisenbugx/ksesh/icon"
+	"github.com/xheisenbugx/ksesh/json"
+	"github.com/xheisenbugx/ksesh/kitty"
+	"github.com/xheisenbugx/ksesh/lister"
+	"github.com/xheisenbugx/ksesh/ls"
+	"github.com/xheisenbugx/ksesh/mkdirer"
+	"github.com/xheisenbugx/ksesh/model"
+	"github.com/xheisenbugx/ksesh/namer"
+	"github.com/xheisenbugx/ksesh/oswrap"
+	"github.com/xheisenbugx/ksesh/pathwrap"
+	"github.com/xheisenbugx/ksesh/picker"
+	"github.com/xheisenbugx/ksesh/previewer"
+	"github.com/xheisenbugx/ksesh/replacer"
+	"github.com/xheisenbugx/ksesh/runtimewrap"
+	"github.com/xheisenbugx/ksesh/sessionfile"
+	"github.com/xheisenbugx/ksesh/shell"
+	"github.com/xheisenbugx/ksesh/startup"
+	"github.com/xheisenbugx/ksesh/worktree"
+	"github.com/xheisenbugx/ksesh/zoxide"
+)
+
+// BaseDeps holds config-free dependencies that can be constructed eagerly.
+type BaseDeps struct {
+	Exec     execwrap.Exec
+	Os       oswrap.Os
+	Path     pathwrap.Path
+	Runtime  runtimewrap.Runtime
+	Home     home.Home
+	Shell    shell.Shell
+	Json     json.Json
+	Replacer replacer.Replacer
+	Git      git.Git
+	Github   github.Github
+	Focuser  focuser.Focuser
+	Dir      dir.Dir
+	Zoxide   zoxide.Zoxide
+}
+
+// Deps holds all dependencies including config-dependent ones.
+type Deps struct {
+	BaseDeps
+	Config        model.Config
+	Kitty         kitty.Kitty
+	Lister        lister.Lister
+	Picker        picker.Picker
+	CachingLister *lister.CachingLister
+	Startup       startup.Startup
+	Namer         namer.Namer
+	Connector     connector.Connector
+	Icon          icon.Icon
+	Previewer     previewer.Previewer
+	Cloner        cloner.Cloner
+	Worktree      worktree.Worktree
+	Browser       browser.Browser
+	Mkdirer       mkdirer.Mkdirer
+}
+
+// NewBaseDeps constructs all config-free dependencies.
+func NewBaseDeps() *BaseDeps {
+	exec := execwrap.NewExec()
+	os := oswrap.NewOs()
+	path := pathwrap.NewPath()
+	runtime := runtimewrap.NewRunTime()
+
+	h := home.NewHome(os)
+	sh := shell.NewShell(exec, h)
+	j := json.NewJson()
+	r := replacer.NewReplacer()
+
+	g := git.NewGit(sh)
+	gh := github.NewGithub(sh, g)
+	fo := focuser.NewFocuser(runtime, sh)
+	d := dir.NewDir(os, g, path)
+
+	return &BaseDeps{
+		Exec:     exec,
+		Os:       os,
+		Path:     path,
+		Runtime:  runtime,
+		Home:     h,
+		Shell:    sh,
+		Json:     j,
+		Replacer: r,
+		Git:      g,
+		Github:   gh,
+		Focuser:  fo,
+		Dir:      d,
+	}
+}
+
+// BuildAll loads config and constructs all config-dependent dependencies.
+func (b *BaseDeps) BuildAll(configPath string) (*Deps, error) {
+	config, err := configurator.NewConfiguratorWithPath(b.Os, b.Path, b.Runtime, configPath).GetConfig()
+	if err != nil {
+		return nil, err
+	}
+
+	slog.Debug("deps: BuildAll", "config", config)
+
+	// Zoxide is the frecency backend; its commands come from config, so it
+	// is constructed here rather than in the config-free NewBaseDeps.
+	b.Zoxide = zoxide.NewZoxide(b.Shell, config.Frecency)
+
+	t := kitty.NewKitty(b.Os, b.Shell, config)
+	sf := sessionfile.NewSessionFile(b.Os, b.Home, config.SessionFileDirs)
+
+	l := ls.NewLs(config, b.Shell)
+	ic := icon.NewIcon(config)
+	fm := formatter.NewFormatter(ic)
+	issueCache := cache.NewNamespace[github.Issue](
+		worktree.IssueCacheName, worktree.IssueCacheVersion, worktree.IssueCacheTTL,
+	).WithMissingTTL(worktree.IssueCacheMissingTTL)
+	li := lister.NewLister(config, b.Home, t, b.Zoxide, sf, fm, issueCache)
+
+	var usedLister lister.Lister = li
+	var cachedLi *lister.CachingLister
+	if config.Cache {
+		fc := cache.NewFileCache()
+		cachedLi = lister.NewCachingLister(li, fc)
+		usedLister = cachedLi
+	}
+
+	s := startup.NewStartup(config, usedLister, t, b.Home, b.Replacer)
+	n := namer.NewNamer(b.Path, b.Git, b.Home, config)
+	c := connector.NewConnector(config, b.Dir, b.Home, usedLister, n, s, t, b.Zoxide, b.Focuser)
+	p := previewer.NewPreviewer(usedLister, t, ic, b.Dir, b.Home, l, config, b.Shell)
+	cl := cloner.NewCloner(c, b.Git)
+	br := browser.NewBrowser(b.Runtime, b.Shell, config.Browser)
+	wt := worktree.NewWorktree(config, b.Git, b.Github, c, br, b.Home, b.Os, b.Path, issueCache)
+	// Removing an entry from the picker has to be written through to the cache,
+	// or the next launch reads back the directory that was just removed. Nil
+	// when caching is off: the picker refetches every time anyway.
+	var refreshCache picker.CacheRefreshFunc
+	if cachedLi != nil {
+		refreshCache = func() { cachedLi.RefreshCache(lister.ListOptions{}) }
+	}
+	pk := picker.NewPicker(config, p, b.Home, usedLister, b.Zoxide, t, refreshCache)
+	mk := mkdirer.NewMkdirer(b.Os, b.Home, c)
+
+	return &Deps{
+		BaseDeps:      *b,
+		Config:        config,
+		Kitty:         t,
+		Lister:        usedLister,
+		Picker:        pk,
+		CachingLister: cachedLi,
+		Startup:       s,
+		Namer:         n,
+		Connector:     c,
+		Icon:          ic,
+		Previewer:     p,
+		Cloner:        cl,
+		Worktree:      wt,
+		Browser:       br,
+		Mkdirer:       mk,
+	}, nil
+}
+
+// buildDeps reads the --config flag from cobra and builds all dependencies.
+func buildDeps(cmd *cobra.Command, base *BaseDeps) (*Deps, error) {
+	configPath, _ := cmd.Root().PersistentFlags().GetString("config")
+	deps, err := base.BuildAll(configPath)
+	if err != nil {
+		var human *configurator.ConfigError
+		if errors.As(err, &human) {
+			fmt.Printf("Couldn't parse config, err: %v\n details:\n %s\n", err.Error(), human.Human())
+		}
+		slog.Error("buildDeps", "error", err)
+		return nil, err
+	}
+	return deps, nil
+}

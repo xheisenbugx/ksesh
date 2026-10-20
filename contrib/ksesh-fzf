@@ -1,0 +1,43 @@
+#!/usr/bin/env bash
+# fzf session picker for ksesh, the kitty counterpart of sesh's fzf-tmux binding.
+#
+# Install: copy this file to ~/.config/kitty/, make it executable, and add to
+# kitty.conf:
+#
+#   map super+t launch --type=overlay --cwd=current ~/.config/kitty/ksesh-fzf
+#
+# Needs listen_on in kitty.conf: the reloads and kills below talk to kitty while
+# fzf owns the terminal, which only works over a socket.
+set -euo pipefail
+
+# An overlay only covers its own window, so in a tab split into several windows
+# the picker would be squeezed into one of them. Zoom the tab to the stack
+# layout while it is up, unless it is zoomed already, and restore it after.
+zoomed=
+if ! kitten @ ls --self | grep -q '"layout": "stack"'; then
+  kitten @ action --self toggle_layout stack && zoomed=1
+fi
+unzoom() {
+  [ -z "$zoomed" ] || kitten @ action --self toggle_layout stack || true
+  zoomed=
+}
+trap unzoom EXIT
+
+selection="$(
+  ksesh list --icons | fzf \
+    --no-sort --ansi --border rounded --border-label ' ksesh ' --prompt '⚡  ' \
+    --header '  ^a all ^t kitty ^g configs ^s session files ^x zoxide ^d kill ^f find' \
+    --bind 'tab:down,btab:up' \
+    --bind 'ctrl-a:change-prompt(⚡  )+reload(ksesh list --icons)' \
+    --bind 'ctrl-t:change-prompt(🪟  )+reload(ksesh list -t --icons)' \
+    --bind 'ctrl-g:change-prompt(⚙️  )+reload(ksesh list -c --icons)' \
+    --bind 'ctrl-s:change-prompt(📄  )+reload(ksesh list -T --icons)' \
+    --bind 'ctrl-x:change-prompt(📁  )+reload(ksesh list -z --icons)' \
+    --bind 'ctrl-f:change-prompt(🔎  )+reload(fd -H -d 2 -t d -E .Trash . ~)' \
+    --bind 'ctrl-d:execute-silent(ksesh kill {})+change-prompt(⚡  )+reload(ksesh list --icons)' \
+    --preview-window 'right:55%' \
+    --preview 'ksesh preview {}'
+)" || exit 0
+
+unzoom
+[ -z "$selection" ] || exec ksesh connect "$selection"

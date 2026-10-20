@@ -1,0 +1,448 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/xheisenbugx/ksesh/raw/main/ksesh.schema.json",
+  "title": "ksesh configuration",
+  "description": "Configuration for ksesh, a smart session manager for kitty (a port of sesh)",
+  "type": "object",
+  "properties": {
+    "cache": {
+      "type": "boolean",
+      "description": "Enable caching for improved performance",
+      "default": false
+    },
+    "strict_mode": {
+      "type": "boolean",
+      "description": "Disallow unknown fields in the configuration file",
+      "default": false
+    },
+    "import": {
+      "type": "array",
+      "description": "Paths to additional config files to import (supports ~ for home directory)",
+      "items": {
+        "type": "string"
+      }
+    },
+    "blacklist": {
+      "type": "array",
+      "description": "List of session names to exclude",
+      "items": {
+        "type": "string"
+      }
+    },
+    "sort_order": {
+      "type": "array",
+      "description": "Order in which session sources appear in the list. An entry may be a source name, listed as its own block, or a nested array of source names, merged into a single block ordered by zoxide score.",
+      "items": {
+        "oneOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "array",
+            "description": "Sources merged into one block, ordered by zoxide score. Sessions whose path zoxide has never seen score 0 and trail the block.",
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1
+          }
+        ]
+      }
+    },
+    "dir_length": {
+      "type": "integer",
+      "description": "Number of directory components to use when naming sessions (minimum 1)",
+      "minimum": 1,
+      "default": 1
+    },
+    "name_substitution": {
+      "type": "array",
+      "description": "Rewrite the path a session name is derived from before it becomes a kitty session name. Rules run against the home-collapsed path for every path-derived source (zoxide, directories, wildcards) but not existing kitty sessions. When no rule matches, naming falls back to the usual git/directory strategies.",
+      "items": {
+        "type": "object",
+        "properties": {
+          "find": {
+            "type": "string",
+            "description": "Text to look for. Matched literally unless regex is true."
+          },
+          "replace": {
+            "type": "string",
+            "description": "Text that find is replaced with. With regex enabled it may reference capture groups as $1, $2, and so on."
+          },
+          "regex": {
+            "type": "boolean",
+            "description": "Treat find as a Go regular expression instead of a literal string.",
+            "default": false
+          }
+        },
+        "required": [
+          "find"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "git_namer_use_worktree_root": {
+      "type": "boolean",
+      "description": "Derive git session names from the current worktree's top-level directory instead of the main repo root. Useful when worktrees are added as siblings of the main clone (e.g. `git worktree add ../feat`).",
+      "default": false
+    },
+    "git_dir_length": {
+      "type": "integer",
+      "description": "Number of directory components to use when naming git-detected sessions (minimum 1). Mirrors dir_length but applies to git strategies.",
+      "minimum": 1,
+      "default": 1
+    },
+    "separator_aware": {
+      "type": "boolean",
+      "description": "Enable separator-aware configuration for the picker",
+      "default": false
+    },
+    "kitten_command": {
+      "type": "string",
+      "description": "The kitten binary used to drive kitty over remote control",
+      "default": "kitten"
+    },
+    "kitty_command": {
+      "type": "string",
+      "description": "The kitty binary, used only to start kitty when ksesh runs outside of it and no instance can be reached",
+      "default": "kitty"
+    },
+    "kitty_socket": {
+      "type": "string",
+      "description": "The address kitty listens on (its listen_on option, e.g. unix:/tmp/kitty), used to reach kitty from outside of it. A path that doesn't exist matches the newest <path>-* socket, since kitty may suffix the pid"
+    },
+    "new_os_window": {
+      "type": "boolean",
+      "description": "Open every new session in an OS window of its own instead of adding its tabs to the current one",
+      "default": false
+    },
+    "session_file_dirs": {
+      "type": "array",
+      "description": "Directories scanned for kitty session files (*.kitty-session, *.kitty_session, *.session)",
+      "items": {
+        "type": "string"
+      },
+      "default": [
+        "~/.config/kitty/sessions"
+      ]
+    },
+    "terminal": {
+      "type": "string",
+      "description": "Terminal emulator app to activate (macOS only) after an out-of-kitty connect, e.g. \"wezterm\""
+    },
+    "browser": {
+      "type": "object",
+      "description": "Browser for `ksesh worktree connect --browser` (reads the active tab, macOS only) and `ksesh worktree browse` (opens URLs in it).",
+      "additionalProperties": false,
+      "properties": {
+        "application": {
+          "type": "string",
+          "description": "Browser application name, e.g. \"Helium\"."
+        },
+        "url_command": {
+          "type": "string",
+          "description": "AppleScript fragment yielding the URL. Default: \"URL of active tab of front window\"."
+        }
+      }
+    },
+    "frecency": {
+      "type": "object",
+      "description": "Override the frecency directory-jumping backend commands to use an alternative to zoxide (e.g. fasd, autojump, memy). Empty fields fall back to the zoxide defaults.",
+      "properties": {
+        "list_command": {
+          "type": "string",
+          "description": "Command that lists all tracked entries, one path per line. A leading numeric score is detected and used when present.",
+          "default": "zoxide query --list --score"
+        },
+        "query_command": {
+          "type": "string",
+          "description": "Command that resolves a single input to a path. The {} placeholder is replaced with the query string.",
+          "default": "zoxide query {}"
+        },
+        "add_command": {
+          "type": "string",
+          "description": "Command that records a path to bump its frecency after connecting. The {} placeholder is replaced with the path.",
+          "default": "zoxide add {}"
+        },
+        "remove_command": {
+          "type": "string",
+          "description": "Command that removes a path from the backend, used by the picker's ctrl+x binding. The {} placeholder is replaced with the path.",
+          "default": "zoxide remove {}"
+        }
+      },
+      "additionalProperties": false
+    },
+    "tui": {
+      "type": "object",
+      "description": "Settings for the ksesh picker TUI",
+      "properties": {
+        "show_icons": {
+          "type": "boolean",
+          "description": "Show icons in the picker TUI"
+        },
+        "show_windows": {
+          "type": "boolean",
+          "description": "Show the window names of each session in the picker TUI (display only, never part of the selected value)"
+        },
+        "window_name_format": {
+          "type": "string",
+          "description": "Template rendered for each tab when show_windows is enabled: {title}, {index}, {id}, {cwd}, {cwd_name}, {active}, {active_title}. The tmux formats #{window_name}, #{window_index} and #{pane_current_path} are accepted as aliases.",
+          "default": "{title}"
+        },
+        "prompt": {
+          "type": "string",
+          "description": "The prompt shown in the picker TUI"
+        },
+        "placeholder": {
+          "type": "string",
+          "description": "The placeholder text in the picker TUI"
+        },
+        "alias_auto_connect_delay": {
+          "type": "string",
+          "description": "Grace period between typing a session alias and auto-connecting to it, leaving room to finish typing a longer alias that shares a prefix. Any Go duration string (e.g. \"150ms\", \"1s\").",
+          "default": "150ms"
+        },
+        "alias_filter_prefix": {
+          "type": "string",
+          "description": "Single character that, typed first in the picker, narrows the list to aliased sessions (e.g. \"/tc\" finds the \"tc\" alias). Set to an empty string to disable.",
+          "default": "/",
+          "maxLength": 1
+        },
+        "preview": {
+          "type": "boolean",
+          "description": "Show a preview of the highlighted session beside the list in the picker TUI, using the same output as `ksesh preview`",
+          "default": false
+        },
+        "preview_width": {
+          "type": "integer",
+          "description": "Share of the terminal width, in percent, guaranteed to the preview pane. The session list keeps its column cap, so any width left over goes to the preview on top of this.",
+          "default": 60,
+          "minimum": 10,
+          "maximum": 90
+        },
+        "preview_min_width": {
+          "type": "integer",
+          "description": "Narrowest terminal, in columns, that still gets a preview pane. Below this the picker renders the session list only.",
+          "default": 100,
+          "minimum": 1
+        },
+        "group_separator": {
+          "type": "boolean",
+          "description": "Draw a faint rule between the sort_order groups in the picker, so the boundary between live kitty sessions and everywhere else stays visible. Suppressed while the list is filtered.",
+          "default": false
+        },
+        "preview_border": {
+          "type": "string",
+          "description": "Divider drawn between the session list and the preview pane. Use \"none\" for no divider.",
+          "enum": [
+            "line",
+            "thick",
+            "double",
+            "none"
+          ],
+          "default": "line"
+        }
+      },
+      "additionalProperties": false
+    },
+    "default_session": {
+      "type": "object",
+      "description": "Default settings applied to all sessions",
+      "properties": {
+        "startup_command": {
+          "type": "string",
+          "description": "Shell command to run when a new session is created"
+        },
+        "preview_command": {
+          "type": "string",
+          "description": "Command used to generate the preview for the session"
+        },
+        "windows": {
+          "type": "array",
+          "description": "List of window names to create in the session",
+          "items": {
+            "type": "string"
+          }
+        },
+        "session_file": {
+          "type": "string",
+          "description": "Start the session from this kitty session file (with goto_session) instead of a shell with startup_command"
+        }
+      },
+      "additionalProperties": false
+    },
+    "session": {
+      "type": "array",
+      "description": "Named session configurations",
+      "items": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Display name for the session"
+          },
+          "path": {
+            "type": "string",
+            "description": "Absolute path to the session's working directory"
+          },
+          "disable_startup_command": {
+            "type": "boolean",
+            "description": "Disable the default startup command for this session",
+            "default": false
+          },
+          "alias": {
+            "type": "string",
+            "description": "Short exact-match shortcut for this session. Shown as a chip in the picker, and resolved by `ksesh connect <alias>`. Must be unique across sessions."
+          },
+          "alias_auto_connect": {
+            "type": "boolean",
+            "description": "Connect to this session as soon as its alias is fully typed in the picker, without pressing enter. Requires `alias`.",
+            "default": false
+          },
+          "icon": {
+            "type": "string",
+            "description": "Icon shown for this session in the picker instead of its source glyph. Any string: a nerd font glyph or an emoji. Picker-only; `ksesh list` keeps the source glyph."
+          },
+          "startup_command": {
+            "type": "string",
+            "description": "Shell command to run when this session is created (overrides default)"
+          },
+          "preview_command": {
+            "type": "string",
+            "description": "Command used to generate the preview for this session"
+          },
+          "windows": {
+            "type": "array",
+            "description": "List of window names to create in this session",
+            "items": {
+              "type": "string"
+            }
+          },
+          "session_file": {
+            "type": "string",
+            "description": "Start the session from this kitty session file (with goto_session) instead of a shell with startup_command"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "window": {
+      "type": "array",
+      "description": "Window configurations",
+      "items": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Name of the window"
+          },
+          "startup_script": {
+            "type": "string",
+            "description": "Script to run when the window is created"
+          },
+          "path": {
+            "type": "string",
+            "description": "Working directory for the window"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "wildcard": {
+      "type": "array",
+      "description": "Wildcard configurations that match session paths by pattern",
+      "items": {
+        "type": "object",
+        "properties": {
+          "pattern": {
+            "type": "string",
+            "description": "Glob pattern to match against session paths"
+          },
+          "startup_command": {
+            "type": "string",
+            "description": "Shell command to run when a matching session is created"
+          },
+          "disable_startup_command": {
+            "type": "boolean",
+            "description": "Disable the default startup command for matching sessions",
+            "default": false
+          },
+          "preview_command": {
+            "type": "string",
+            "description": "Command used to generate the preview for matching sessions"
+          },
+          "windows": {
+            "type": "array",
+            "description": "Window layout to use for matching sessions",
+            "items": {
+              "type": "string"
+            }
+          },
+          "icon": {
+            "type": "string",
+            "description": "Icon shown for matching sessions in the picker instead of their source glyph. Any string: a nerd font glyph or an emoji. Picker-only; `ksesh list` keeps the source glyph."
+          },
+          "session_file": {
+            "type": "string",
+            "description": "Start the session from this kitty session file (with goto_session) instead of a shell with startup_command"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "worktree": {
+      "type": "array",
+      "description": "Per-repo git worktree configurations for `ksesh worktree`",
+      "items": {
+        "type": "object",
+        "properties": {
+          "repo": {
+            "type": "string",
+            "description": "GitHub repository as org/repo"
+          },
+          "path": {
+            "type": "string",
+            "description": "Local repository root (supports ~ for home directory)"
+          },
+          "worktree_dir": {
+            "type": "string",
+            "description": "Where worktrees are created; relative to path or absolute",
+            "default": ".wk"
+          },
+          "branch_template": {
+            "type": "string",
+            "description": "Branch name template; {number} is replaced with the issue/PR number",
+            "default": "{number}"
+          },
+          "base_branch": {
+            "type": "string",
+            "description": "Ref new worktrees branch from",
+            "default": "origin/main"
+          },
+          "fetch": {
+            "type": "boolean",
+            "description": "Run git fetch before creating the worktree",
+            "default": true
+          },
+          "startup_command": {
+            "type": "string",
+            "description": "Shell command to run when connecting to a worktree that already existed"
+          },
+          "create_command": {
+            "type": "string",
+            "description": "Shell command to run instead of startup_command on the connect that creates the worktree"
+          },
+          "icon": {
+            "type": "string",
+            "description": "Icon shown for every session under this repo's worktree root, in the picker and `ksesh list --json`/`ksesh worktree list --json`. Any string: a nerd font glyph or an emoji."
+          },
+          "session_file": {
+            "type": "string",
+            "description": "Start the session from this kitty session file (with goto_session) instead of a shell with startup_command"
+          }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}

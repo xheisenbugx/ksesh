@@ -1,0 +1,66 @@
+package connector
+
+import (
+	"fmt"
+
+	"github.com/xheisenbugx/ksesh/model"
+)
+
+// TODO: make it configurable to change the order of connection establishments?
+// ["kitty", "config", "dir", "zoxide"]
+// TODO: make it configurable to disable certain strategies (including flags for optimized fzf commands)
+// sesh connect --config (sesh list --config | fzf)
+var strategies = []func(*RealConnector, string) (model.Connection, error){
+	kittyWindowStrategy,
+	kittyStrategy,
+	sessionFileStrategy,
+	configStrategy,
+	configWildcardStrategy,
+	dirStrategy,
+	zoxideStrategy,
+}
+
+// Resolve runs the strategy chain to work out what a name refers to, without
+// touching kitty. Window and pane connects share it so they identify a session
+// exactly the way `sesh connect` does.
+func (c *RealConnector) Resolve(name string) (model.Connection, error) {
+	name = c.resolveAlias(name)
+	for _, strategy := range strategies {
+		connection, err := strategy(c, name)
+		if err != nil {
+			return model.Connection{}, fmt.Errorf("failed to establish connection: %w", err)
+		}
+		if connection.Found {
+			return connection, nil
+		}
+	}
+	return model.Connection{Found: false}, nil
+}
+
+// TODO: send to logging (local txt file?)
+func (c *RealConnector) Connect(name string, opts model.ConnectOpts) (string, error) {
+	connectStrategy := map[string]func(c *RealConnector, connection model.Connection, opts model.ConnectOpts) (string, error){
+		"kitty-window":    connectToKittyWindow,
+		"kitty":           connectToKitty,
+		"sessionfile":     connectToSessionFile,
+		"config":          connectToKitty,
+		"config_wildcard": connectToKitty,
+		"dir":             connectToKitty,
+		"zoxide":          connectToKitty,
+	}
+
+	connection, err := c.Resolve(name)
+	if err != nil {
+		return "", err
+	}
+	if !connection.Found {
+		return "", fmt.Errorf("no connection found for '%s'", name)
+	}
+
+	// TODO: allow CLI flag to disable zoxide and overwrite all settings?
+	// sesh connect --ignore-zoxide "dotfiles"
+	if connection.AddToZoxide {
+		c.zoxide.Add(connection.Session.Path)
+	}
+	return connectStrategy[connection.Session.Src](c, connection, opts)
+}

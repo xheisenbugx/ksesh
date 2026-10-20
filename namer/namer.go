@@ -1,0 +1,84 @@
+package namer
+
+import (
+	"fmt"
+
+	"github.com/xheisenbugx/ksesh/git"
+	"github.com/xheisenbugx/ksesh/home"
+	"github.com/xheisenbugx/ksesh/model"
+	"github.com/xheisenbugx/ksesh/pathwrap"
+)
+
+type Namer interface {
+	// Names a sesh session from a given path
+	Name(path string) (string, error)
+	// Names a sesh session from the root of a given path
+	RootName(path string) (string, error)
+}
+
+type RealNamer struct {
+	pathwrap pathwrap.Path
+	git      git.Git
+	home     home.Home
+	config   model.Config
+}
+
+func NewNamer(pathwrap pathwrap.Path, git git.Git, home home.Home, config model.Config) Namer {
+	return &RealNamer{
+		pathwrap: pathwrap,
+		git:      git,
+		home:     home,
+		config:   config,
+	}
+}
+
+func (n *RealNamer) Name(path string) (string, error) {
+	path, err := n.pathwrap.EvalSymlinks(path)
+	if err != nil {
+		return "", err
+	}
+
+	strategies := []func(*RealNamer, string) (string, error){
+		nameSubstitution,
+		gitName,
+		dirName,
+	}
+
+	for _, strategy := range strategies {
+		name, err := strategy(n, path)
+		if err != nil {
+			return "", err
+		}
+		// A strategy only wins if its output survives normalization. A rule
+		// that rewrites the path to whitespace, for example, collapses to
+		// nothing here and must not be handed to kitty as a session name.
+		if valid := convertToValidName(name); valid != "" {
+			return valid, nil
+		}
+	}
+	return "", fmt.Errorf("could not determine name from path: %s", path)
+}
+
+func (n *RealNamer) RootName(path string) (string, error) {
+	path, err := n.pathwrap.EvalSymlinks(path)
+	if err != nil {
+		return "", err
+	}
+
+	strategies := []func(*RealNamer, string) (string, error){
+		nameSubstitution,
+		gitRootName,
+		dirName,
+	}
+
+	for _, strategy := range strategies {
+		name, err := strategy(n, path)
+		if err != nil {
+			return "", err
+		}
+		if valid := convertToValidName(name); valid != "" {
+			return valid, nil
+		}
+	}
+	return "", fmt.Errorf("could not determine root name from path: %s", path)
+}
