@@ -1,0 +1,107 @@
+[
+  {
+    "id": 1,
+    "is_active": true,
+    "is_focused": true,
+    "tabs": [
+      {
+        "id": 1,
+        "is_active": false,
+        "title": "nvim",
+        "windows": [
+          {
+            "id": 1,
+            "is_active": true,
+            "title": "nvim",
+            "cwd": "/home/dev/c/sesh",
+            "cmdline": ["/bin/zsh"],
+            "last_focused_at": 10.5,
+            "created_at": 1700000000000000000,
+            "session_name": "sesh",
+            "user_vars": {"ksesh_root": "/home/dev/c/sesh"},
+            "needs_attention": false,
+            "has_activity_since_last_focus": false,
+            "foreground_processes": [{"cmdline": ["nvim", "."], "cwd": "/home/dev/c/sesh/lister"}]
+          },
+          {
+            "id": 2,
+            "is_active": false,
+            "title": "zsh",
+            "cwd": "/home/dev/c/sesh",
+            "cmdline": ["/bin/zsh"],
+            "last_focused_at": 9.0,
+            "created_at": 1700000001000000000,
+            "session_name": "sesh",
+            "user_vars": {},
+            "needs_attention": false,
+            "has_activity_since_last_focus": true,
+            "foreground_processes": [{"cmdline": ["-zsh"], "cwd": "/home/dev/c/sesh"}]
+          }
+        ]
+      },
+      {
+        "id": 2,
+        "is_active": false,
+        "title": "server",
+        "windows": [
+          {
+            "id": 3,
+            "is_active": true,
+            "title": "server",
+            "cwd": "/home/dev/c/sesh",
+            "cmdline": ["/bin/zsh"],
+            "last_focused_at": 0,
+            "created_at": 1700000002000000000,
+            "session_name": "sesh",
+            "user_vars": {"ksesh_root": "/home/dev/c/sesh"},
+            "needs_attention": false,
+            "has_activity_since_last_focus": false,
+            "foreground_processes": []
+          }
+        ]
+      },
+      {
+        "id": 3,
+        "is_active": true,
+        "title": "notes",
+        "windows": [
+          {
+            "id": 4,
+            "is_active": true,
+            "title": "notes",
+            "cwd": "/home/dev/notes",
+            "cmdline": ["/bin/zsh"],
+            "last_focused_at": 20.0,
+            "created_at": 1700000003000000000,
+            "session_name": "notes",
+            "user_vars": {"ksesh_name": "Second Brain"},
+            "needs_attention": true,
+            "has_activity_since_last_focus": false,
+            "foreground_processes": [{"cmdline": ["-zsh"], "cwd": "/home/dev/notes/daily"}]
+          }
+        ]
+      },
+      {
+        "id": 4,
+        "is_active": false,
+        "title": "scratch",
+        "windows": [
+          {
+            "id": 5,
+            "is_active": true,
+            "title": "scratch",
+            "cwd": "/tmp",
+            "cmdline": ["/bin/zsh"],
+            "last_focused_at": 30.0,
+            "created_at": 1700000004000000000,
+            "session_name": "",
+            "user_vars": {},
+            "needs_attention": false,
+            "has_activity_since_last_focus": false,
+            "foreground_processes": []
+          }
+        ]
+      }
+    ]
+  }
+]

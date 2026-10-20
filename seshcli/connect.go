@@ -1,0 +1,64 @@
+package seshcli
+
+import (
+	"errors"
+	"strings"
+
+	"github.com/spf13/cobra"
+
+	"github.com/xheisenbugx/ksesh/lister"
+	"github.com/xheisenbugx/ksesh/model"
+)
+
+func NewConnectCommand(base *BaseDeps) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:     "connect",
+		Aliases: []string{"cn"},
+		Short:   "Connect to the given session",
+		Args:    cobra.MinimumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if len(args) == 0 {
+				return errors.New("please provide a session name")
+			}
+			name := strings.Join(args, " ")
+			if name == "" {
+				return nil
+			}
+
+			deps, err := buildDeps(cmd, base)
+			if err != nil {
+				return err
+			}
+
+			switchFlag, _ := cmd.Flags().GetBool("switch")
+			command, _ := cmd.Flags().GetString("command")
+			root, _ := cmd.Flags().GetBool("root")
+
+			if root {
+				hasRootDir, rootDir := base.Dir.RootDir(name)
+				if hasRootDir {
+					name = rootDir
+				}
+			}
+
+			opts := model.ConnectOpts{Switch: switchFlag, Command: command}
+			trimmedName := deps.Icon.RemoveIcon(name)
+			if _, err := deps.Connector.Connect(trimmedName, opts); err != nil {
+				// TODO: add to logging
+				return err
+			}
+			// Refresh cache in background so next sesh list has fresh data
+			if deps.CachingLister != nil {
+				deps.CachingLister.RefreshCache(lister.ListOptions{})
+				deps.CachingLister.Wait()
+			}
+			return nil
+		},
+	}
+
+	cmd.Flags().BoolP("switch", "s", false, "Switch the session from outside kitty (kitty is brought to the front either way; kept for sesh compatibility)")
+	cmd.Flags().StringP("command", "c", "", "Execute a command when connecting to a new session. Will be ignored if the session exists.")
+	cmd.Flags().BoolP("root", "r", false, "Switches to the root of the current session")
+
+	return cmd
+}

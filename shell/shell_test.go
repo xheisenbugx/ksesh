@@ -1,0 +1,125 @@
+package shell
+
+import (
+	"testing"
+
+	"github.com/xheisenbugx/ksesh/execwrap"
+	"github.com/xheisenbugx/ksesh/home"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
+)
+
+func TestShellCmd(t *testing.T) {
+	t.Run("run should succeed", func(t *testing.T) {
+		mockExec := new(execwrap.MockExec)
+		mockExec.On("LookPath", "echo", mock.Anything).Return("echo", nil)
+		mockCmd := new(execwrap.MockExecCmd)
+		shell := &RealShell{exec: mockExec}
+		mockCmd.On("CombinedOutput").Return([]byte("hello"), nil)
+		mockExec.On("Command", "echo", mock.Anything).Return(mockCmd)
+		out, err := shell.Cmd("echo", "hello")
+		assert.Nil(t, err)
+		assert.Equal(t, "hello", out)
+	})
+}
+
+func TestShellListCmd(t *testing.T) {
+	t.Run("run should succeed", func(t *testing.T) {
+		mockExec := new(execwrap.MockExec)
+		mockCmd := new(execwrap.MockExecCmd)
+		shell := &RealShell{exec: mockExec}
+		dirListingActual := []byte(`total 9720
+drwxr-xr-x  17 joshmedeski  staff      544 Apr 11 21:40 ./
+drwxr-xr-x   8 joshmedeski  staff      256 Apr 11 19:05 ../
+-rw-r--r--   1 joshmedeski  staff       53 Apr 11 09:00 .git`)
+		mockCmd.On("Output").Return(dirListingActual, nil)
+		mockExec.On("Command", "ls", mock.Anything).Return(mockCmd)
+		dirListingExpected := []string{
+			"total 9720",
+			"drwxr-xr-x  17 joshmedeski  staff      544 Apr 11 21:40 ./",
+			"drwxr-xr-x   8 joshmedeski  staff      256 Apr 11 19:05 ../",
+			"-rw-r--r--   1 joshmedeski  staff       53 Apr 11 09:00 .git",
+		}
+		list, err := shell.ListCmd("ls", "-la")
+		assert.Nil(t, err)
+		assert.Equal(t, dirListingExpected, list)
+	})
+}
+
+func TestShellPrepareCmd(t *testing.T) {
+	t.Run("should succeed with correct replacements and expansions", func(t *testing.T) {
+		mockHome := new(home.MockHome)
+		shell := &RealShell{home: mockHome}
+		mockHome.On("ExpandPath", "~/.local/bin/rat").Return("/home/test/.local/bin/rat", nil)
+		mockHome.On("ExpandPath", "{}").Return("{}", nil)
+		cmdParts, err := shell.PrepareCmd("~/.local/bin/rat {}", map[string]string{"{}": "hello"})
+		assert.Nil(t, err)
+		assert.Equal(t, []string{"/home/test/.local/bin/rat", "hello"}, cmdParts)
+	})
+
+	// This test case asserts the existing behaviour when the desired replacement is not separated by spaces
+	t.Run("should not use a partial match", func(t *testing.T) {
+		mockHome := new(home.MockHome)
+		shell := &RealShell{home: mockHome}
+		mockHome.On("ExpandPath", "~/.local/bin/rat").Return("/home/test/.local/bin/rat", nil)
+		mockHome.On("ExpandPath", "localVar={}").Return("localVar={}", nil)
+		cmdParts, err := shell.PrepareCmd("~/.local/bin/rat localVar={}", map[string]string{"{}": "hello"})
+		assert.Nil(t, err)
+		assert.Equal(t, []string{"/home/test/.local/bin/rat", "localVar={}"}, cmdParts)
+	})
+
+	t.Run("should expand environment variables", func(t *testing.T) {
+		mockHome := new(home.MockHome)
+		shell := &RealShell{home: mockHome}
+		mockHome.On("ExpandPath", "$TOOL").Return("/opt/tool", nil)
+		mockHome.On("ExpandPath", "--flag").Return("--flag", nil)
+		cmdParts, err := shell.PrepareCmd("$TOOL --flag", map[string]string{})
+		assert.Nil(t, err)
+		assert.Equal(t, []string{"/opt/tool", "--flag"}, cmdParts)
+	})
+}
+
+func TestShellShellCmd(t *testing.T) {
+	t.Run("runs compound commands with shell operators (&&, ||, |, ;)", func(t *testing.T) {
+		mockExec := new(execwrap.MockExec)
+		mockExec.On("LookPath", userShell()).Return(userShell(), nil)
+		shell := &RealShell{exec: mockExec}
+
+		out, err := shell.ShellCmd("echo one && echo two", map[string]string{})
+		assert.Nil(t, err)
+		assert.Equal(t, "one\ntwo", out)
+	})
+
+	t.Run("substitutes placeholders with shell-quoted values", func(t *testing.T) {
+		mockExec := new(execwrap.MockExec)
+		mockExec.On("LookPath", userShell()).Return(userShell(), nil)
+		shell := &RealShell{exec: mockExec}
+
+		// A path containing a space and a shell metacharacter must be
+		// treated as a single literal argument, not split or interpreted.
+		out, err := shell.ShellCmd(`echo {} && echo done`, map[string]string{
+			"{}": "hello world && rm -rf /tmp/should-not-run",
+		})
+		assert.Nil(t, err)
+		assert.Equal(t, "hello world && rm -rf /tmp/should-not-run\ndone", out)
+	})
+
+	t.Run("returns an error when the command fails", func(t *testing.T) {
+		mockExec := new(execwrap.MockExec)
+		mockExec.On("LookPath", userShell()).Return(userShell(), nil)
+		shell := &RealShell{exec: mockExec}
+
+		_, err := shell.ShellCmd("exit 1", map[string]string{})
+		assert.Error(t, err)
+	})
+}
+
+func TestShellQuote(t *testing.T) {
+	t.Run("wraps plain values in single quotes", func(t *testing.T) {
+		assert.Equal(t, "'hello'", shellQuote("hello"))
+	})
+
+	t.Run("escapes embedded single quotes", func(t *testing.T) {
+		assert.Equal(t, `'it'\''s'`, shellQuote("it's"))
+	})
+}

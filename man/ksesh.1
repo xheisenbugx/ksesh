@@ -1,0 +1,416 @@
+.TH KSESH 1 "2026-10-06" "ksesh" "Smart session manager for kitty"
+.SH NAME
+ksesh - Smart session manager for kitty
+.SH SYNOPSIS
+\fBksesh\fP [\fIoptions\&.\&.\&.\fP] [\fIargument\&.\&.\&.\fP]
+.SH DESCRIPTION
+ksesh is a smart session manager for the kitty terminal that helps you create and manage kitty sessions quickly and easily using zoxide\&. It is a port of sesh, with kitty's native sessions in place of tmux\&.
+.SH OPTIONS
+.TP
+\fB-C, --config\fP
+path to config file
+.SH COMMANDS
+.TP
+\fBcache\fP
+.RS 4
+Manage the session list cache
+.RE
+.TP
+\fBCOMMANDS\fP
+.RS 4
+\fBrefresh\fP
+.RS 4
+Rebuild the session list cache from live data
+.RE
+.RE
+.TP
+\fBclone\fP <repo> [-- <extra git flags>]
+.RS 4
+Clone a git repo and connect to it as a session
+.RE
+.TP
+\fBOPTIONS\fP
+.RS 4
+\fB-c, --cmdDir\fP
+The directory to run the git command in
+.TP
+\fB-d, --dir\fP
+The name of the directory that git is creating
+.RE
+.TP
+\fBcompletion\fP
+.RS 4
+Generate the autocompletion script for the specified shell
+.RE
+.TP
+\fBCOMMANDS\fP
+.RS 4
+\fBbash\fP
+.RS 4
+Generate the autocompletion script for bash
+.RE
+.TP
+\fBOPTIONS\fP
+.RS 4
+\fB--no-descriptions\fP
+disable completion descriptions
+.RE
+.TP
+\fBfish\fP
+.RS 4
+Generate the autocompletion script for fish
+.RE
+.TP
+\fBOPTIONS\fP
+.RS 4
+\fB--no-descriptions\fP
+disable completion descriptions
+.RE
+.TP
+\fBpowershell\fP
+.RS 4
+Generate the autocompletion script for powershell
+.RE
+.TP
+\fBOPTIONS\fP
+.RS 4
+\fB--no-descriptions\fP
+disable completion descriptions
+.RE
+.TP
+\fBzsh\fP
+.RS 4
+Generate the autocompletion script for zsh
+.RE
+.TP
+\fBOPTIONS\fP
+.RS 4
+\fB--no-descriptions\fP
+disable completion descriptions
+.RE
+.RE
+.TP
+\fBconnect\fP
+.RS 4
+Connect to the given session
+.RE
+.TP
+\fBOPTIONS\fP
+.RS 4
+\fB-c, --command\fP
+Execute a command when connecting to a new session\&. Will be ignored if the session exists\&.
+.TP
+\fB-r, --root\fP
+Switches to the root of the current session
+.TP
+\fB-s, --switch\fP
+Switch the session from outside kitty (kitty is brought to the front either way; kept for sesh compatibility)
+.RE
+.TP
+\fBhelp\fP [command]
+.RS 4
+Help about any command
+.RE
+.TP
+\fBlast\fP
+.RS 4
+Connect to the last kitty session
+.RE
+.TP
+\fBlist\fP
+.RS 4
+List sessions
+.RE
+.TP
+\fBOPTIONS\fP
+.RS 4
+\fB-b, --blacklisted\fP
+show blacklisted sessions
+.TP
+\fB-c, --config\fP
+show configured sessions
+.TP
+\fB--format\fP
+format each session row ({name}, {session}, {source}, {path}, {active_window_name}, {active_window_name_prefix}; colors: {fg:yellow}\&.\&.\&.{/fg})
+.TP
+\fB-H, --hide-attached\fP
+don't show currently attached sessions
+.TP
+\fB-d, --hide-duplicates\fP
+hide duplicate entries
+.TP
+\fB-i, --icons\fP
+show icons
+.TP
+\fB--icons-exclude\fP
+don't show source icons for these session sources (for example: kitty)
+.TP
+\fB-j, --json\fP
+output as json
+.TP
+\fB-t, --kitty\fP
+show running kitty sessions
+.TP
+\fB-n, --no-color\fP
+show icons without color (requires --icons)
+.TP
+\fB-p, --panes\fP
+show the kitty windows (panes) of the current session
+.TP
+\fB-T, --session-files\fP
+show kitty session files
+.TP
+\fB--tmux\fP
+alias of --kitty, for scripts written for sesh
+.TP
+\fB-z, --zoxide\fP
+show zoxide results
+.RE
+.TP
+\fBmkdir\fP <path>
+.RS 4
+Create a directory and connect to it as a session
+.RE
+.TP
+\fBOPTIONS\fP
+.RS 4
+\fB-c, --command\fP
+Execute a command when connecting to the new session\&.
+.TP
+\fB-s, --switch\fP
+Switch the session (rather than attach)\&. This is useful for actions triggered outside the terminal\&.
+.RE
+.TP
+\fBpicker\fP
+.RS 4
+Interactive session picker
+.RE
+.TP
+\fBOPTIONS\fP
+.RS 4
+\fB-c, --config\fP
+show configured sessions
+.TP
+\fB-H, --hide-attached\fP
+don't show currently attached sessions
+.TP
+\fB-d, --hide-duplicates\fP
+hide duplicate entries
+.TP
+\fB-i, --icons\fP
+show icons
+.TP
+\fB-t, --kitty\fP
+show running kitty sessions
+.TP
+\fB--no-alias-auto\fP
+don't auto-connect when an alias is fully typed
+.TP
+\fB--no-preview\fP
+hide the preview pane
+.TP
+\fB--placeholder\fP
+placeholder text in the picker TUI
+.TP
+\fB--preview\fP
+show a preview of the highlighted session beside the list
+.TP
+\fB-p, --prompt\fP
+prompt shown in the picker TUI
+.TP
+\fB-q, --query\fP
+prefill the picker's filter with this query
+.TP
+\fB-s, --separator-aware\fP
+match spaces to separators (-_/\e)
+.TP
+\fB-T, --session-files\fP
+show kitty session files
+.TP
+\fB--tmux\fP
+alias of --kitty, for scripts written for sesh
+.TP
+\fB-z, --zoxide\fP
+show zoxide results
+.RE
+.TP
+\fBpreview\fP
+.RS 4
+Preview a session or directory
+.RE
+.TP
+\fBOPTIONS\fP
+.RS 4
+\fB--interval\fP
+refresh interval when watching
+.TP
+\fB-w, --watch\fP
+continuously refresh the preview
+.RE
+.TP
+\fBrename\fP [name]
+.RS 4
+Rename a kitty session, optionally enriching it with its GitHub issue title
+.RE
+.TP
+\fBOPTIONS\fP
+.RS 4
+\fB--enrich\fP
+Rename the session to include its GitHub issue title
+.TP
+\fB--to\fP
+Rename the session to this name
+.RE
+.TP
+\fBroot\fP
+.RS 4
+Show the root from the active session
+.RE
+.TP
+\fBtab\fP
+.RS 4
+List or connect to the tabs of a kitty session (tmux windows)
+.RE
+.TP
+\fBCOMMANDS\fP
+.RS 4
+\fBconnect\fP [name|directory]
+.RS 4
+Select a tab, creating it if it doesn't exist
+.RE
+.TP
+\fBOPTIONS\fP
+.RS 4
+\fB-b, --background\fP
+create without focusing it
+.TP
+\fB-c, --command\fP
+command to run in the target
+.TP
+\fB--new\fP
+always create, even when the name matches a tab that exists
+.TP
+\fB-p, --path\fP
+start directory (default: the target session's root)
+.TP
+\fB--session\fP
+target session
+.TP
+\fB-s, --switch\fP
+Switch the session from outside kitty (kept for sesh compatibility)
+.TP
+\fB-t, --target\fP
+target session (default: current attached session)
+.RE
+.TP
+\fBlist\fP
+.RS 4
+List the tabs of a kitty session
+.RE
+.TP
+\fBOPTIONS\fP
+.RS 4
+\fB-j, --json\fP
+output as json
+.TP
+\fB--session\fP
+target session
+.TP
+\fB-t, --target\fP
+target session (default: current attached session)
+.RE
+.RE
+.TP
+\fBworktree\fP
+.RS 4
+Manage git worktrees as kitty sessions
+.RE
+.TP
+\fBCOMMANDS\fP
+.RS 4
+\fBbrowse\fP
+.RS 4
+Open the focused worktree session's issue/PR in the browser
+.RE
+.TP
+\fBOPTIONS\fP
+.RS 4
+\fB-p, --pr\fP
+Open the pull request for the worktree's branch
+.TP
+\fB--print\fP
+Print the URL instead of opening it
+.RE
+.TP
+\fBconnect\fP [number]
+.RS 4
+Connect to a worktree for an issue/PR, creating it if it doesn't exist
+.RE
+.TP
+\fBOPTIONS\fP
+.RS 4
+\fB-b, --browser\fP
+Read the issue/PR from the active browser tab (macOS)
+.TP
+\fB-p, --pr\fP
+Treat the number as a pull request
+.TP
+\fB-r, --repo\fP
+Target repo as org/repo (overrides cwd detection)
+.TP
+\fB-s, --switch\fP
+Switch the session rather than attach (for use outside kitty)
+.RE
+.TP
+\fBlist\fP
+.RS 4
+List worktrees with their issue titles
+.RE
+.TP
+\fBOPTIONS\fP
+.RS 4
+\fB-j, --json\fP
+output as json
+.TP
+\fB--path\fP
+Worktree root to list, e\&.g\&. ~/c/nu/w
+.TP
+\fB--refresh\fP
+Refetch every title and state, ignoring the cache
+.TP
+\fB-r, --repo\fP
+Target repo as org/repo (overrides cwd detection)
+.RE
+.TP
+\fBpicker\fP
+.RS 4
+Interactively pick a worktree and connect to it
+.RE
+.TP
+\fBOPTIONS\fP
+.RS 4
+\fB-i, --icons\fP
+round the state badges off with nerd font half circles
+.TP
+\fB--path\fP
+Worktree root to pick from, e\&.g\&. ~/c/nu/w
+.TP
+\fB--placeholder\fP
+placeholder text in the picker TUI
+.TP
+\fB-p, --prompt\fP
+prompt shown in the picker TUI
+.TP
+\fB-q, --query\fP
+prefill the picker's filter with this query
+.TP
+\fB--refresh\fP
+Refetch titles and states, ignoring the cache (ctrl+r does the same from the picker)
+.TP
+\fB-r, --repo\fP
+Target repo as org/repo (overrides cwd detection)
+.TP
+\fB-s, --switch\fP
+Switch the session rather than attach (for use outside kitty)
+.RE
+.RE
