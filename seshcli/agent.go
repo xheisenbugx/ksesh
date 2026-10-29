@@ -163,7 +163,11 @@ func newAgentListCommand(base *BaseDeps) *cobra.Command {
 			}
 			noColor, _ := cmd.Flags().GetBool("no-color")
 			withIDs, _ := cmd.Flags().GetBool("ids")
-			for i, row := range agentRows(agents, time.Now(), !noColor) {
+			sep := "  "
+			if withIDs {
+				sep = "\t "
+			}
+			for i, row := range agentRows(agents, time.Now(), !noColor, sep) {
 				if withIDs {
 					row = strconv.Itoa(agents[i].WindowID) + "\t" + agents[i].Status + "\t" + row
 				}
@@ -175,7 +179,7 @@ func newAgentListCommand(base *BaseDeps) *cobra.Command {
 	cmd.Flags().BoolP("json", "j", false, "output as json")
 	cmd.Flags().BoolP("attention", "A", false, "only the agents waiting, done or failed")
 	cmd.Flags().Bool("no-color", false, "don't color the status icons")
-	cmd.Flags().Bool("ids", false, "start each line with the window id and the status, tab separated, for fzf and 'ksesh agent focus'")
+	cmd.Flags().Bool("ids", false, "start each line with the window id and the status, and end the session and tab with a tab too, for fzf and 'ksesh agent focus'")
 	return cmd
 }
 
