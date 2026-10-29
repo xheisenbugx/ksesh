@@ -3,9 +3,11 @@ package lister
 import (
 	"fmt"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 
+	"github.com/xheisenbugx/ksesh/agent"
 	"github.com/xheisenbugx/ksesh/model"
 )
 
@@ -40,6 +42,7 @@ func kittyToSesh(session *model.KittySession, aliases map[string]string) model.S
 		LastAttached: cloneTime(session.LastAttached),
 		Activity:     cloneTime(session.Activity),
 		Alerts:       session.Alerts,
+		AgentStatus:  session.AgentStatus,
 	}
 }
 
@@ -72,6 +75,28 @@ func listKitty(l *RealLister) (model.SeshSessions, error) {
 		Directory:    directory,
 		OrderedIndex: orderedIndex,
 	}, nil
+}
+
+// listKittyByAttention lists kitty sessions with the ones whose agents need
+// you (waiting, failed, done) first, most urgent first, and the rest in the
+// usual most-recently-focused order. Only listings are reordered:
+// GetLastKittySession reads listKitty, where recency alone decides.
+func listKittyByAttention(l *RealLister) (model.SeshSessions, error) {
+	sessions, err := listKitty(l)
+	if err != nil {
+		return sessions, err
+	}
+	urgency := func(key string) int {
+		status := agent.Status(sessions.Directory[key].AgentStatus)
+		if !status.NeedsAttention() {
+			return 0
+		}
+		return status.Priority()
+	}
+	slices.SortStableFunc(sessions.OrderedIndex, func(a, b string) int {
+		return urgency(b) - urgency(a)
+	})
+	return sessions, nil
 }
 
 // kittyWindowNames fetches the window names of every live kitty session in a

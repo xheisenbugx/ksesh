@@ -25,6 +25,16 @@ type Worktree interface {
 	// BrowseURL returns the GitHub URL for the worktree containing
 	// sessionPath: its issue, or with pr the pull request for its branch.
 	BrowseURL(sessionPath string, pr bool) (string, error)
+	// New creates a worktree for a branch in the repo of the current
+	// directory, or reuses it, and connects to it as a session.
+	New(opts model.WorktreeNewOpts) (string, error)
+	// Worktrees lists the current repo's worktrees, with their git state
+	// when withStatus is set.
+	Worktrees(withStatus bool) ([]model.GitWorktree, error)
+	// RemoveCandidates resolves the worktrees `worktree rm` would remove.
+	RemoveCandidates(opts model.WorktreeRemoveOpts) ([]model.GitWorktree, error)
+	// Remove removes a worktree and, unless keepBranch, its branch.
+	Remove(wt model.GitWorktree, force bool, keepBranch bool) error
 }
 
 type RealWorktree struct {

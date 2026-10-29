@@ -14,18 +14,20 @@ import (
 // single-width glyphs it comes from; Cell pads it when a wider icon is in play.
 func SourceGlyph(src string) (string, color.Color) {
 	if g, ok := Glyphs[src]; ok {
-		var code int
-		switch {
-		case g.ColorCode >= 90 && g.ColorCode <= 97:
-			code = g.ColorCode - 82
-		case g.ColorCode >= 30 && g.ColorCode <= 37:
-			code = g.ColorCode - 30
-		default:
-			code = g.ColorCode
-		}
-		return g.Icon + " ", lipgloss.ANSIColor(code)
+		return g.Icon + " ", ansiColor(g.ColorCode)
 	}
 	return "? ", lipgloss.ANSIColor(8)
+}
+
+// ansiColor turns an SGR foreground code (31, 94, …) into the palette color.
+func ansiColor(sgr int) color.Color {
+	switch {
+	case sgr >= 90 && sgr <= 97:
+		return lipgloss.ANSIColor(sgr - 82)
+	case sgr >= 30 && sgr <= 37:
+		return lipgloss.ANSIColor(sgr - 30)
+	}
+	return lipgloss.ANSIColor(sgr)
 }
 
 // ColumnWidth is the display width an icon column needs: one cell for the
@@ -59,6 +61,13 @@ func Cell(custom, src string, width int) string {
 		return cell + pad(width+1-lipgloss.Width(cell))
 	}
 	return custom + " " + pad(width+1-lipgloss.Width(strings.TrimRight(custom, " ")+" "))
+}
+
+// StatusCell renders an agent status glyph in the icon column, colored and
+// padded like a source glyph.
+func StatusCell(glyph string, colorCode int, width int) string {
+	cell := lipgloss.NewStyle().Foreground(ansiColor(colorCode)).Render(glyph + " ")
+	return cell + pad(width+1-lipgloss.Width(cell))
 }
 
 func pad(n int) string {

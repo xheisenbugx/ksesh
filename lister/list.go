@@ -36,7 +36,7 @@ type strategyResult struct {
 }
 
 var srcStrategies = map[string]srcStrategy{
-	"kitty":        listKitty,
+	"kitty":        listKittyByAttention,
 	"config":       listConfig,
 	"sessionfile":  listSessionFile,
 	"zoxide":       listZoxide,

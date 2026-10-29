@@ -99,6 +99,8 @@ ksesh tab connect logs     # select the "logs" tab, creating it if missing
 ksesh tab connect ~/c/api -c 'npm run dev'
 ksesh list -p              # kitty windows of the current session
 ksesh worktree connect 42  # git worktree for issue/PR #42 as a session
+ksesh wt new feat/login    # git worktree for a branch as a session (see Worktrees)
+ksesh agent next           # jump to the agent that needs you (see Agents)
 ```
 
 With fzf instead of the built-in picker:
@@ -126,6 +128,137 @@ Running ksesh **outside kitty**: it reaches kitty through `$KITTY_LISTEN_ON` or
 the `kitty_socket` option and brings kitty to the front after switching. When no
 kitty can be reached at all, `ksesh connect` starts one (the equivalent of sesh
 starting the tmux server).
+
+## Agents
+
+ksesh tracks the coding agents running in kitty, so you can see at a glance
+which one needs you and jump straight to it, without tmux.
+
+Each agent reports its status on its own kitty window as user variables
+(`ksesh_status` = `working`, `waiting`, `done`, `error` or `idle`, plus
+`ksesh_msg`, `ksesh_prompt`, `ksesh_status_at` and `ksesh_turn_at`). For Claude
+Code, `ksesh agent install` adds hooks to `~/.claude/settings.json` that run
+`ksesh agent hook` on every event that changes it (prompt submitted → working,
+permission prompt → waiting, stop → done, API failure → error), keeping your
+other hooks. A permission prompt's message says what it would allow (`Allow
+Bash: npm test`, `Allow Edit: src/main.go`), so you can answer it from the
+picker without looking at the agent. Other agents can call `ksesh agent set waiting -m "…"` from their
+own hooks; agents without any (codex, gemini, aider, …) are still listed, as
+idle, by their program.
+
+```sh
+ksesh agent install          # Claude Code hooks (uninstall removes them)
+ksesh agent list             # every agent, the ones that need you first
+ksesh agent list -A          # only waiting, failed or done
+ksesh agent next             # go to the one waiting longest; again for the next
+ksesh agent last             # back to the agent you were with before
+ksesh agent set done -m "…"  # report a status by hand or from another agent
+ksesh agent send 42 --key enter --if-status waiting  # approve without switching
+ksesh agent send 42 "use the existing helper"         # reply without switching
+ksesh agent show 42          # status, branch, changes and screen of window 42
+ksesh agent diff 42          # review it: branch vs base, commits, files, diff
+```
+
+`ksesh agent diff` reviews the agent's worktree the way its branch will be
+reviewed: everything since it left its base (origin's default branch), so
+commits, uncommitted changes and new files alike, with the files not committed
+yet marked `●`. The diff is drawn with line numbers and tinted backgrounds, and
+goes through [delta](https://github.com/dandavison/delta) instead when it is
+installed.
+
+[`contrib/ksesh-agents-fzf`](contrib/ksesh-agents-fzf) is a live picker over
+them (it refreshes every 2 seconds), with the agent's screen, or its git diff,
+on the right, from which most things you'd switch to an agent for can be done
+in place. Its footer only shows the keys that do something for the selected
+agent (approve and deny for a waiting one, interrupt for a working one, …):
+
+| key      | does                                                    |
+| -------- | ------------------------------------------------------- |
+| `enter`  | go to the agent                                         |
+| `ctrl-y` | approve: enter in a waiting agent's permission prompt   |
+| `ctrl-x` | interrupt a working agent, deny a waiting one (escape)  |
+| `ctrl-o` | reply: type a message and send it                       |
+| `ctrl-s` | mark seen (back to idle)                                |
+| `ctrl-g` | preview the review (`ksesh agent diff`) instead of the screen, and back; files with hundreds of changed lines are folded |
+| `alt-d`  | the full review in `less`, nothing folded               |
+| `ctrl-d` | scroll the preview half a page down (`ctrl-u` up)       |
+| `alt-b`  | open the branch's pull request                          |
+| `alt-w`  | close the agent's window (asks first)                   |
+
+The status also shows wherever sessions do: `ksesh list -i`, `ksesh-fzf` and
+the picker draw a session's most urgent agent status in place of its kitty
+icon, and list sessions that need you first.
+
+In kitty itself, [`contrib/ksesh_agents.py`](contrib/ksesh_agents.py) adds:
+
+- a status icon on each tab with an agent;
+- at the right end of the tab bar, an **attention strip** naming every *other*
+  session with an agent waiting on you or failed. `tab_bar_filter session:.`
+  hides other sessions' tabs, and the strip is how you still see them;
+- a desktop notification when an agent starts waiting, fails or finishes, only
+  if you aren't looking at its window. Clicking it focuses the window, and it
+  goes away on its own once the agent moves on (say you approved it from the
+  picker). A turn that finishes in under 30 seconds doesn't notify;
+- "done" turns back to idle once you focus the agent's window, or right away
+  if it finishes while you're looking at it.
+
+Copy `contrib/ksesh_agents.py`, `contrib/ksesh_watcher.py`,
+`contrib/tab_bar.py` and `contrib/ksesh_reload.py` next to `kitty.conf`
+(merge `tab_bar.py` into yours if you have one), and add:
+
+```conf
+watcher ksesh_watcher.py
+tab_title_template "{custom}"
+tab_bar_style custom
+
+# Next agent that needs you / back to the previous agent / agent picker.
+map super+j       launch --type=background ksesh agent next
+map super+shift+j launch --type=background ksesh agent last
+map super+a       launch --type=overlay --cwd=current ~/.config/kitty/ksesh-agents-fzf
+```
+
+kitty reads `tab_bar.py` and watchers once and keeps them until it quits.
+`kitten @ kitten ksesh_reload.py` loads new ones into the running kitty, so
+your sessions don't have to go. `ksesh_agents.py` itself is re-read whenever it
+changes. The hooks need `listen_on`: without a socket they do nothing rather
+than talk to kitty over Claude's own terminal.
+
+## Worktrees
+
+Besides `ksesh worktree connect <issue>` (GitHub issues and PRs, below), ksesh
+manages plain branch worktrees in any repo, workmux-style, as kitty sessions:
+
+```sh
+ksesh wt new feat/login                        # worktree + session for a branch
+ksesh wt new feat/login -p "add a login page"  # …and start claude with a prompt
+ksesh wt new fix/typo --agent codex -b origin/release
+ksesh wt status                                # every worktree: agent, changes, ↑↓ vs base
+ksesh wt rm                                    # remove this session's worktree, branch and session
+ksesh wt rm --gone --merged                    # clean up the ones whose PR was merged
+```
+
+`wt new` checks out the branch when it exists locally or on `origin`, and
+creates it from `--base` (default: `base_branch`, else origin's default
+branch) otherwise. Worktrees go in the repo's `[[worktree]] worktree_dir`, or
+next to the repo in `<repo>__worktrees/<branch>` without a block. A new
+worktree gets the files listed in `.worktreeinclude` (the file Claude Code and
+others use for this, as paths and globs) and in `copy` copied in from the main
+worktree, and `symlink` linked. The session then runs `create_command`, then the
+agent (`agent_command`, default `claude`):
+
+```toml
+[[worktree]]
+path = "~/c/app"
+worktree_dir = "../app__worktrees"
+copy = [".env", "config/*.local"]
+symlink = ["node_modules"]
+create_command = "pnpm install"
+agent_command = "claude"
+```
+
+`wt rm` refuses a worktree with uncommitted changes and keeps an unmerged
+branch unless `--force`. A `--gone` branch (upstream deleted) counts as merged,
+since a squash-merged PR never looks merged to git.
 
 ## Configuration
 

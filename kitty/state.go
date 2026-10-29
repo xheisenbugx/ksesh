@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/xheisenbugx/ksesh/agent"
 	"github.com/xheisenbugx/ksesh/model"
 )
 
@@ -90,6 +91,8 @@ type sessionState struct {
 	lastFocused float64
 	created     int64
 	alerts      []string
+	// agentStatus is the most urgent status among the session's agents.
+	agentStatus agent.Status
 }
 
 type state struct {
@@ -189,6 +192,7 @@ func (s *sessionState) add(w lsWindow, tabID int, selfID int) {
 	if w.HasActivity && !contains(s.alerts, "activity") {
 		s.alerts = append(s.alerts, "activity")
 	}
+	s.agentStatus = agent.MostUrgent(s.agentStatus, windowStatus(w))
 }
 
 // finish settles what can only be known once every window has been seen.
@@ -289,6 +293,7 @@ func (s *sessionState) model(attached bool) *model.KittySession {
 		FocusWindowID: s.focusID,
 		LastFocused:   s.lastFocused,
 		Alerts:        s.alerts,
+		AgentStatus:   string(s.agentStatus),
 	}
 	if attached {
 		session.Attached = 1

@@ -30,4 +30,7 @@ type KittySession struct {
 	LastAttached *time.Time
 	Activity     *time.Time
 	Alerts       []string
+	// AgentStatus is the most urgent status of the agents in the session
+	// (see the agent package), empty when none reports one.
+	AgentStatus string
 }

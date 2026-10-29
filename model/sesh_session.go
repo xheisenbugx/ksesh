@@ -44,6 +44,7 @@ type (
 		LastAttached *time.Time // Last attach time
 		Activity     *time.Time // Last activity time
 		Alerts       []string   // Active alerts (e.g. bell, activity)
+		AgentStatus  string     // Most urgent status of the session's agents (see the agent package)
 	}
 
 	WorktreeInfo struct {
