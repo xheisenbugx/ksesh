@@ -1,20 +1,24 @@
-# Tab titles for ksesh, used as {custom} in kitty.conf's tab_title_template:
+# Tab bar for ksesh, used by kitty.conf's tab_title_template and
+# tab_bar_style:
 #
 #     tab_title_template "{custom}"
+#     tab_bar_style custom
 #
 # - A tab is titled with its number ("2"); one renamed with set_tab_title shows
 #   its number and name ("2 database"), cut to 20 characters.
 # - A tab with an agent shows its status icon (see ksesh_agents.py, which must
 #   be next to this file): "2 [bell] api".
 # - The active tab also names its session, using the name ksesh shows (kept in
-#   the ksesh_name user variable for sessions kitty can't name directly), and
-#   then every other session with an agent that needs you.
+#   the ksesh_name user variable for sessions kitty can't name directly).
+# - Tabs are drawn the way the default fade style draws them, and the right end
+#   of the bar names every other session with an agent blocked on you.
 #
 # kitty reads this file once: run `kitten @ kitten ksesh_reload.py` (or restart
 # kitty) after editing it. ksesh_agents.py is re-read on its own when it changes.
 import os
 
 from kitty.fast_data_types import get_boss
+from kitty.tab_bar import draw_tab_with_fade
 
 MAX_NAME = 20
 
@@ -81,6 +85,11 @@ def draw_title(data) -> str:
     if tm is not None and tm.active_tab is tab:
         if session := _session(tab):
             title += f' · {session}'
-        if (strip := agents.get('attention_strip')) is not None:
-            title += strip(boss, agents['session_of_tab'](tab), restore)
     return title
+
+
+def draw_tab(draw_data, screen, tab, before, max_tab_length, index, is_last, extra_data) -> int:
+    end = draw_tab_with_fade(draw_data, screen, tab, before, max_tab_length, index, is_last, extra_data)
+    if is_last and (strip := _agents().get('draw_strip')) is not None:
+        strip(get_boss(), draw_data, screen)
+    return end

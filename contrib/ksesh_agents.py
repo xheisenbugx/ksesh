@@ -9,9 +9,10 @@
 #
 # With tab_bar_filter session:. kitty only shows the active session's tabs, so
 # an agent in another session would be invisible. The strip fixes that: the
-# active tab lists every other session with an agent that needs you, e.g.
+# right end of the tab bar lists every other session with an agent blocked on
+# you, apart from the tabs, e.g.
 #
-#     1 code  2 [bell] web · api │ [bell] auth  [check] docs
+#     1 code  2 [bell] web · api                needs you: [bell] auth  [warning] docs
 from __future__ import annotations
 
 import base64
@@ -21,6 +22,7 @@ from typing import Any
 STATUS_VAR = 'ksesh_status'
 MSG_VAR = 'ksesh_msg'
 PROMPT_VAR = 'ksesh_prompt'
+TURN_AT_VAR = 'ksesh_turn_at'
 NAME_VAR = 'ksesh_name'
 
 # Most urgent first. The icons are single-cell Font Awesome glyphs from a nerd
@@ -32,11 +34,17 @@ STATUSES: dict[str, tuple[str, str]] = {
     'working': ('', '#89b4fa'),  # spinner, blue
 }
 PRIORITY = {s: len(STATUSES) - i for i, s in enumerate(STATUSES)}
-ATTENTION = ('waiting', 'error', 'done')
+# What the strip shows: agents blocked on you. Finished ones only notify, and
+# wait in the picker.
+STRIP = ('waiting', 'error')
 
 # Desktop notifications for these, only when the agent's window isn't the one
-# you're looking at (kitty's o=unfocused).
+# you're looking at (kitty's o=unfocused). A notification goes away once the
+# agent moves on, e.g. when you approve it from the picker.
 NOTIFY = {'waiting': 'needs you', 'error': 'failed', 'done': 'finished'}
+# A turn shorter than this finishes without a notification: you were likely
+# still around for a quick answer.
+QUIET_TURN = 30
 # How many sessions the strip names before summing up the rest as "+N".
 STRIP_MAX = 4
 STRIP_NAME_MAX = 14
@@ -90,14 +98,15 @@ def tab_badge(tab: Any, restore: str) -> str:
     return _icon(status, restore) + ' '
 
 
-def attention_strip(boss: Any, current_session: str, restore: str) -> str:
-    """Every other session whose agents need you, most urgent first."""
+def attention(boss: Any, current_session: str) -> list[tuple[str, str]]:
+    """(status, name) of every other session with an agent blocked on you,
+    most urgent first, then longest waiting first."""
     by_session: dict[str, str] = {}
     since: dict[str, float] = {}
     for w in boss.all_windows:
         status = _status(w)
         native = w.created_in_session_name
-        if status not in ATTENTION or not native or native == current_session:
+        if status not in STRIP or not native or native == current_session:
             continue
         if PRIORITY[status] > PRIORITY.get(by_session.get(native, ''), 0):
             by_session[native] = status
@@ -106,23 +115,48 @@ def attention_strip(boss: Any, current_session: str, restore: str) -> str:
         except ValueError:
             at = 0
         since[native] = min(since.get(native, at), at)
-    if not by_session:
-        return ''
     names = session_names(boss)
     order = sorted(by_session, key=lambda s: (-PRIORITY[by_session[s]], since.get(s, 0)))
-    parts = []
-    for native in order[:STRIP_MAX]:
-        name = names.get(native, native)
+    return [(by_session[native], names.get(native, native)) for native in order]
+
+
+def draw_strip(boss: Any, draw_data: Any, screen: Any) -> None:
+    """Draw the attention strip at the right end of the tab bar, after the
+    tabs are drawn. It is left out when the tabs leave no room for it."""
+    from kitty.fast_data_types import wcswidth
+    from kitty.tab_bar import as_rgb, color_as_int
+
+    tm = boss.os_window_map.get(draw_data.os_window_id)
+    if tm is None or tm.active_tab is None:
+        return
+    items = attention(boss, session_of_tab(tm.active_tab))
+    if not items:
+        return
+    # (text, color) runs; None is the bar's own inactive color.
+    runs: list[tuple[str, int | None]] = [('needs you: ', None)]
+    for i, (status, name) in enumerate(items[:STRIP_MAX]):
         if len(name) > STRIP_NAME_MAX:
             name = name[: STRIP_NAME_MAX - 1] + '…'
-        parts.append(f'{_icon(by_session[native], restore)} {name}')
-    if len(order) > STRIP_MAX:
-        parts.append(f'+{len(order) - STRIP_MAX}')
-    return ' │ ' + '  '.join(parts)
+        icon, color = STATUSES[status]
+        runs += [('  ' if i else '', None), (icon, int(color.lstrip('#'), 16)), (f' {name}', None)]
+    if len(items) > STRIP_MAX:
+        runs.append((f'  +{len(items) - STRIP_MAX}', None))
+    runs.append((' ', None))
+    width = sum(wcswidth(text) for text, _ in runs)
+    start = screen.columns - width
+    if start < screen.cursor.x + 2:
+        return
+    screen.cursor.x = start
+    screen.cursor.bold = screen.cursor.italic = False
+    screen.cursor.bg = as_rgb(color_as_int(draw_data.default_bg))
+    for text, color in runs:
+        screen.cursor.fg = as_rgb(color if color is not None else color_as_int(draw_data.inactive_fg))
+        screen.draw(text)
 
 
 # Watcher side. ---------------------------------------------------------------
 
+# The last notification each window got, while it may still be on screen.
 _notified: dict[int, tuple[str, float]] = {}
 
 
@@ -163,13 +197,37 @@ def _notify(boss: Any, window: Any, status: str) -> None:
         window.desktop_notify(99, memoryview(f'{meta}:d=1:p=title;{b64(title)}'.encode()))
 
 
+def _close_notification(window: Any) -> None:
+    if _notified.pop(window.id, None) is not None:
+        window.desktop_notify(99, memoryview(f'i=ksesh-{window.id}:p=close;'.encode()))
+
+
+def _is_watched(boss: Any, window: Any) -> bool:
+    from kitty.fast_data_types import current_focused_os_window_id
+
+    return boss.active_window is window and window.os_window_id == current_focused_os_window_id()
+
+
+def _quick_turn(window: Any) -> bool:
+    try:
+        return time.time() - float(window.user_vars.get(TURN_AT_VAR, '')) < QUIET_TURN
+    except ValueError:
+        return False
+
+
 def on_set_user_var(boss: Any, window: Any, data: dict[str, Any]) -> None:
     if data.get('key') != STATUS_VAR:
         return
     _redraw(boss)
     status = data.get('value') or ''
-    if status in NOTIFY:
+    if status == 'done' and _is_watched(boss, window):
+        # It finished in front of you: already seen.
+        window.set_user_var(STATUS_VAR, 'idle')
+        return
+    if status in NOTIFY and not (status == 'done' and _quick_turn(window)):
         _notify(boss, window, status)
+    else:
+        _close_notification(window)
 
 
 def on_focus_change(boss: Any, window: Any, data: dict[str, Any]) -> None:
@@ -177,6 +235,7 @@ def on_focus_change(boss: Any, window: Any, data: dict[str, Any]) -> None:
     # failed ones still do, until they move on.
     if data.get('focused') and _status(window) == 'done':
         window.set_user_var(STATUS_VAR, 'idle')
+        _close_notification(window)
 
 
 def on_close(boss: Any, window: Any, data: dict[str, Any]) -> None:

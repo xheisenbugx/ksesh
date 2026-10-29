@@ -2,7 +2,8 @@
 # fzf picker over the coding agents running in kitty: the ones that need you
 # first, live (it refreshes every 2 seconds), with the agent's screen or its
 # git diff on the right. Most things you'd switch to an agent for can be done
-# from here without leaving the window you're in:
+# from here without leaving the window you're in. The footer only shows the
+# keys that do something for the selected agent:
 #
 #   enter   go to the agent
 #   ctrl-y  approve: press enter in a waiting agent (its permission prompt)
@@ -12,11 +13,12 @@
 #   ctrl-g  preview what the agent did instead of its screen, and back: its
 #           branch against the base, commits, files (● not committed yet) and
 #           diff, with generated-size files folded
-#   alt-d   the same review full screen, everything unfolded, in less
-#   ctrl-d  scroll the preview down half a page (ctrl-u up)
-#   ctrl-a  only the agents that need you, and back to all of them
-#   alt-n   new worktree + agent in the selected agent's repo
 #   alt-b   open the pull request of the agent's branch in the browser
+#
+# and, not in the footer:
+#
+#   alt-d   the review full screen, everything unfolded, in less
+#   ctrl-d  scroll the preview down half a page (ctrl-u up)
 #   alt-w   close the agent's window (asks first)
 #   ctrl-/  hide or show the preview
 #
@@ -33,20 +35,19 @@ self="$(cd "$(dirname "$0")" && pwd)/$(basename "$0")"
 # Subcommands the key bindings run. The window id is the first argument.
 case "${1:-}" in
 list)
-  # The list to show, honoring the ctrl-a filter.
-  if [ "$(cat "$KSESH_AGENTS_MODE" 2>/dev/null)" = attention ]; then
-    exec ksesh agent list --ids --attention
-  fi
+  # Lines are: window id, status, the row shown.
   exec ksesh agent list --ids
   ;;
-toggle)
-  if [ "$(cat "$KSESH_AGENTS_MODE" 2>/dev/null)" = attention ]; then
-    echo all >"$KSESH_AGENTS_MODE"
-    echo "change-prompt(all › )+reload-sync($self list)"
-  else
-    echo attention >"$KSESH_AGENTS_MODE"
-    echo "change-prompt(needs you › )+reload-sync($self list)"
-  fi
+footer)
+  # The keys that do something for an agent in this status.
+  case "${2:-}" in
+  waiting) echo 'enter go  ^y approve  ^x deny  ^o reply  ^g diff  esc quit' ;;
+  working) echo 'enter go  ^x interrupt  ^o reply  ^g diff  esc quit' ;;
+  done) echo 'enter go  ^g diff  alt-b PR  ^s seen  esc quit' ;;
+  error) echo 'enter go  ^o reply  ^g diff  ^s seen  esc quit' ;;
+  '') echo 'esc quit' ;;
+  *) echo 'enter go  ^o reply  ^g diff  alt-b PR  esc quit' ;;
+  esac
   exit 0
   ;;
 tick)
@@ -65,22 +66,10 @@ preview)
   exit 0
   ;;
 reply)
-  printf '\033[1mReply to %s\033[0m (enter sends, empty cancels)\n' "$(ksesh agent list --ids --no-color | awk -F'\t' -v id="$2" '$1 == id { sub(/^ +/, "", $2); print $2 }')"
+  printf '\033[1mReply to %s\033[0m (enter sends, empty cancels)\n' "$(ksesh agent list --ids --no-color | awk -F'\t' -v id="$2" '$1 == id { sub(/^ +/, "", $3); print $3 }')"
   read -e -r -p '› ' text || exit 0
   [ -z "$text" ] || ksesh agent send "$2" "$text"
   exit 0
-  ;;
-new)
-  dir="$(ksesh agent path "$2")" || exit 0
-  cd "$dir"
-  printf '\033[1mNew worktree in %s\033[0m (empty branch cancels)\n' "$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
-  read -e -r -p 'branch › ' branch || exit 0
-  [ -n "$branch" ] || exit 0
-  read -e -r -p 'prompt › ' prompt || exit 0
-  if [ -n "$prompt" ]; then
-    exec ksesh wt new "$branch" --prompt "$prompt"
-  fi
-  exec ksesh wt new "$branch" --agent
   ;;
 pr)
   dir="$(ksesh agent path "$2")" || exit 0
@@ -103,8 +92,6 @@ if ! kitten @ ls --self | grep -q '"layout": "stack"'; then
 fi
 
 state="$(mktemp -d "${TMPDIR:-/tmp}/ksesh-agents.XXXXXX")"
-export KSESH_AGENTS_MODE="$state/mode"
-echo all >"$KSESH_AGENTS_MODE"
 sock="$state/fzf.sock"
 
 refresher=
@@ -127,10 +114,12 @@ refresher=$!
 
 "$self" list | fzf \
   --listen="$sock" --id-nth 1 \
-  --ansi --no-sort --layout reverse --delimiter '\t' --with-nth 2 \
+  --ansi --no-sort --layout reverse --delimiter '\t' --with-nth 3 \
   --border rounded --border-label ' agents ' --info inline-right \
-  --prompt 'all › ' --ghost 'filter by session, title or message' \
-  --footer $'enter go  ^y approve  ^x interrupt/deny  ^o reply  ^s seen  ^a needs you\n^g diff  alt-d full review  ^d/^u scroll  alt-n new worktree  alt-b PR  alt-w close  esc quit' \
+  --prompt '› ' --ghost 'filter by session, title or message' \
+  --footer 'esc quit' \
+  --bind "focus:transform-footer($self footer {2})" \
+  --bind "result:transform-footer($self footer {2})" \
   --bind 'tab:down,btab:up' \
   --bind 'enter:become(ksesh agent focus {1})' \
   --bind "ctrl-y:execute-silent(ksesh agent send {1} --key enter --if-status waiting)+reload-sync($self list)" \
@@ -140,8 +129,6 @@ refresher=$!
   --bind "ctrl-g:transform($self preview)" \
   --bind 'alt-d:execute(ksesh agent diff {1} --width $FZF_COLUMNS | less -R)' \
   --bind 'ctrl-d:preview-half-page-down,ctrl-u:preview-half-page-up' \
-  --bind "ctrl-a:transform($self toggle)" \
-  --bind "alt-n:become($self new {1})" \
   --bind "alt-b:execute-silent($self pr {1})" \
   --bind "alt-w:execute($self close {1})+reload-sync($self list)" \
   --bind 'ctrl-/:toggle-preview' \

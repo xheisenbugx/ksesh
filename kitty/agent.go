@@ -18,6 +18,7 @@ const (
 	StatusAtVar = "ksesh_status_at"
 	MsgVar      = "ksesh_msg"
 	PromptVar   = "ksesh_prompt"
+	TurnAtVar   = "ksesh_turn_at"
 )
 
 // agentPrograms are the agents recognized by the program running in a window,
@@ -42,7 +43,7 @@ func (k *RealKitty) SetAgentStatus(windowID int, u agent.Update) error {
 		}
 	}
 	if u.Clear {
-		for _, name := range []string{AgentVar, StatusVar, StatusAtVar, MsgVar, PromptVar} {
+		for _, name := range []string{AgentVar, StatusVar, StatusAtVar, MsgVar, PromptVar, TurnAtVar} {
 			set(name, "")
 		}
 	} else {
@@ -55,7 +56,11 @@ func (k *RealKitty) SetAgentStatus(windowID int, u agent.Update) error {
 		if u.SetPrompt {
 			set(PromptVar, u.Prompt)
 		}
-		set(StatusAtVar, strconv.FormatInt(time.Now().Unix(), 10))
+		now := strconv.FormatInt(time.Now().Unix(), 10)
+		if u.StartTurn {
+			set(TurnAtVar, now)
+		}
+		set(StatusAtVar, now)
 		// The status goes last: kitty calls the watcher once per variable, and
 		// contrib/ksesh_agents.py notifies on the status, reading the message
 		// the same call has set by then.

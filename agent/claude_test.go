@@ -17,7 +17,7 @@ func TestFromClaudeHook(t *testing.T) {
 		{
 			name:  "a prompt starts work and replaces the last message",
 			input: `{"hook_event_name":"UserPromptSubmit","prompt":"\n  add a **login** page\nwith tests"}`,
-			want:  Update{Agent: "claude", Status: Working, Prompt: "add a login page", SetPrompt: true, SetMessage: true},
+			want:  Update{Agent: "claude", Status: Working, Prompt: "add a login page", SetPrompt: true, SetMessage: true, StartTurn: true},
 			ok:    true,
 		},
 		{
@@ -27,15 +27,33 @@ func TestFromClaudeHook(t *testing.T) {
 			ok:    true,
 		},
 		{
-			name:  "a permission request waits on you",
-			input: `{"hook_event_name":"PermissionRequest","tool_name":"Bash"}`,
-			want:  Update{Agent: "claude", Status: Waiting, Message: "Needs permission: Bash", SetMessage: true},
+			name:  "a denial by auto mode keeps it working",
+			input: `{"hook_event_name":"PermissionDenied","tool_name":"Bash"}`,
+			want:  Update{Agent: "claude", Status: Working, SetMessage: true},
 			ok:    true,
 		},
 		{
-			name:  "a permission prompt notification waits on you",
+			name:  "a permission request waits on you, saying what it would run",
+			input: `{"hook_event_name":"PermissionRequest","tool_name":"Bash","tool_input":{"command":"npm test\nnpm run lint","description":"Run the tests"}}`,
+			want:  Update{Agent: "claude", Status: Waiting, Message: "Allow Bash: npm test", SetMessage: true},
+			ok:    true,
+		},
+		{
+			name:  "a permission request names the file it would edit",
+			input: `{"hook_event_name":"PermissionRequest","tool_name":"Edit","tool_input":{"file_path":"/src/main.go","old_string":"a"}}`,
+			want:  Update{Agent: "claude", Status: Waiting, Message: "Allow Edit: /src/main.go", SetMessage: true},
+			ok:    true,
+		},
+		{
+			name:  "a permission request for a tool without a known input names the tool",
+			input: `{"hook_event_name":"PermissionRequest","tool_name":"mcp__github__create_issue","tool_input":{"title":"x"}}`,
+			want:  Update{Agent: "claude", Status: Waiting, Message: "Allow mcp__github__create_issue", SetMessage: true},
+			ok:    true,
+		},
+		{
+			name:  "a permission prompt notification waits on you, keeping the request's message",
 			input: `{"hook_event_name":"Notification","notification_type":"permission_prompt","message":"Claude needs your permission to use Bash"}`,
-			want:  Update{Agent: "claude", Status: Waiting, Message: "Claude needs your permission to use Bash", SetMessage: true},
+			want:  Update{Agent: "claude", Status: Waiting},
 			ok:    true,
 		},
 		{

@@ -9,6 +9,7 @@
 //	ksesh_status_at  unix seconds of the last change
 //	ksesh_msg        why it is waiting, what it finished with, or the error
 //	ksesh_prompt     the prompt it is working on
+//	ksesh_turn_at    unix seconds it started on that prompt
 //
 // User variables live and die with the window, show up in `kitten @ ls`, and
 // reach kitty's watchers and tab bar (contrib/ksesh_agents.py), so nothing has

@@ -93,10 +93,22 @@ func TestSetAgentStatus(t *testing.T) {
 	require.NoError(t, err)
 }
 
+func TestSetAgentStatusStartsATurn(t *testing.T) {
+	k, mShell := newAgentKitty(t, "7")
+	at := mock.MatchedBy(func(s string) bool { return strings.HasPrefix(s, "ksesh_turn_at=") })
+	statusAt := mock.MatchedBy(func(s string) bool { return strings.HasPrefix(s, "ksesh_status_at=") })
+	mShell.EXPECT().CmdCapture("kitten", "@", "set-user-vars", "--match", "id:7",
+		"ksesh_agent=claude", "ksesh_msg", "ksesh_prompt=fix it", at, statusAt, "ksesh_status=working").Return("", nil)
+
+	err := k.SetAgentStatus(0, agent.Update{Agent: "claude", Status: agent.Working, SetMessage: true, Prompt: "fix it", SetPrompt: true, StartTurn: true})
+
+	require.NoError(t, err)
+}
+
 func TestSetAgentStatusClears(t *testing.T) {
 	k, mShell := newAgentKitty(t, "7")
 	mShell.EXPECT().CmdCapture("kitten", "@", "set-user-vars", "--match", "id:3",
-		"ksesh_agent", "ksesh_status", "ksesh_status_at", "ksesh_msg", "ksesh_prompt").Return("", nil)
+		"ksesh_agent", "ksesh_status", "ksesh_status_at", "ksesh_msg", "ksesh_prompt", "ksesh_turn_at").Return("", nil)
 
 	require.NoError(t, k.SetAgentStatus(3, agent.Update{Clear: true}))
 }

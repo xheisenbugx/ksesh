@@ -136,11 +136,13 @@ which one needs you and jump straight to it, without tmux.
 
 Each agent reports its status on its own kitty window as user variables
 (`ksesh_status` = `working`, `waiting`, `done`, `error` or `idle`, plus
-`ksesh_msg`, `ksesh_prompt` and `ksesh_status_at`). For Claude Code,
-`ksesh agent install` adds hooks to `~/.claude/settings.json` that run
+`ksesh_msg`, `ksesh_prompt`, `ksesh_status_at` and `ksesh_turn_at`). For Claude
+Code, `ksesh agent install` adds hooks to `~/.claude/settings.json` that run
 `ksesh agent hook` on every event that changes it (prompt submitted → working,
 permission prompt → waiting, stop → done, API failure → error), keeping your
-other hooks. Other agents can call `ksesh agent set waiting -m "…"` from their
+other hooks. A permission prompt's message says what it would allow (`Allow
+Bash: npm test`, `Allow Edit: src/main.go`), so you can answer it from the
+picker without looking at the agent. Other agents can call `ksesh agent set waiting -m "…"` from their
 own hooks; agents without any (codex, gemini, aider, …) are still listed, as
 idle, by their program.
 
@@ -167,7 +169,8 @@ installed.
 [`contrib/ksesh-agents-fzf`](contrib/ksesh-agents-fzf) is a live picker over
 them (it refreshes every 2 seconds), with the agent's screen, or its git diff,
 on the right, from which most things you'd switch to an agent for can be done
-in place:
+in place. Its footer only shows the keys that do something for the selected
+agent (approve and deny for a waiting one, interrupt for a working one, …):
 
 | key      | does                                                    |
 | -------- | ------------------------------------------------------- |
@@ -179,8 +182,6 @@ in place:
 | `ctrl-g` | preview the review (`ksesh agent diff`) instead of the screen, and back; files with hundreds of changed lines are folded |
 | `alt-d`  | the full review in `less`, nothing folded               |
 | `ctrl-d` | scroll the preview half a page down (`ctrl-u` up)       |
-| `ctrl-a` | only the agents that need you, and back                 |
-| `alt-n`  | new worktree + agent in the selected agent's repo       |
 | `alt-b`  | open the branch's pull request                          |
 | `alt-w`  | close the agent's window (asks first)                   |
 
@@ -191,12 +192,15 @@ icon, and list sessions that need you first.
 In kitty itself, [`contrib/ksesh_agents.py`](contrib/ksesh_agents.py) adds:
 
 - a status icon on each tab with an agent;
-- on the active tab, an **attention strip** naming every *other* session with an
-  agent waiting, failed or done. `tab_bar_filter session:.` hides other
-  sessions' tabs, and the strip is how you still see them;
+- at the right end of the tab bar, an **attention strip** naming every *other*
+  session with an agent waiting on you or failed. `tab_bar_filter session:.`
+  hides other sessions' tabs, and the strip is how you still see them;
 - a desktop notification when an agent starts waiting, fails or finishes, only
-  if you aren't looking at its window. Clicking it focuses the window;
-- "done" turns back to idle once you focus the agent's window.
+  if you aren't looking at its window. Clicking it focuses the window, and it
+  goes away on its own once the agent moves on (say you approved it from the
+  picker). A turn that finishes in under 30 seconds doesn't notify;
+- "done" turns back to idle once you focus the agent's window, or right away
+  if it finishes while you're looking at it.
 
 Copy `contrib/ksesh_agents.py`, `contrib/ksesh_watcher.py`,
 `contrib/tab_bar.py` and `contrib/ksesh_reload.py` next to `kitty.conf`
@@ -205,6 +209,7 @@ Copy `contrib/ksesh_agents.py`, `contrib/ksesh_watcher.py`,
 ```conf
 watcher ksesh_watcher.py
 tab_title_template "{custom}"
+tab_bar_style custom
 
 # Next agent that needs you / back to the previous agent / agent picker.
 map super+j       launch --type=background ksesh agent next
