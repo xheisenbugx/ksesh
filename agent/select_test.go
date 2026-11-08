@@ -96,6 +96,18 @@ func TestCleanTitle(t *testing.T) {
 	assert.Equal(t, "✳", CleanTitle("✳"), "nothing left means nothing to clean")
 }
 
+func TestSortIdleAndWorkingMostRecentFirst(t *testing.T) {
+	list := []*model.Agent{
+		{WindowID: 1, Status: "idle", Since: at(60 * 23)},
+		{WindowID: 2, Status: "idle"},
+		{WindowID: 3, Status: "idle", Since: at(3)},
+		{WindowID: 4, Status: "working", Since: at(30)},
+		{WindowID: 5, Status: "working", Since: at(1)},
+	}
+	Sort(list)
+	assert.Equal(t, []int{5, 4, 3, 1, 2}, ids(list), "agents with no time to go by last")
+}
+
 func TestSortGroupsAgentsWithoutTimesBySession(t *testing.T) {
 	list := []*model.Agent{
 		{WindowID: 1, Status: "idle", Session: "web", TabTitle: "b"},

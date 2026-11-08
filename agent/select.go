@@ -9,16 +9,21 @@ import (
 	"github.com/xheisenbugx/ksesh/model"
 )
 
-// Sort orders agents most urgent first and, within a status, longest in it
-// first: the agent that has been waiting on you the longest is the one to
-// answer next.
+// Sort orders agents most urgent first. Within a status that needs you, the
+// one in it longest comes first: the agent that has been waiting on you the
+// longest is the one to answer next. Working and idle agents don't, so the
+// most recently active come first, and stale ones sink to the bottom.
 func Sort(agents []*model.Agent) {
 	slices.SortStableFunc(agents, func(a, b *model.Agent) int {
 		pa, pb := Status(a.Status).Priority(), Status(b.Status).Priority()
 		if pa != pb {
 			return pb - pa
 		}
-		if c := since(a).Compare(since(b)); c != 0 {
+		c := since(a).Compare(since(b))
+		if !Status(a.Status).NeedsAttention() {
+			c = -c
+		}
+		if c != 0 {
 			return c
 		}
 		// Agents with no time to go by stay grouped by where they are.
