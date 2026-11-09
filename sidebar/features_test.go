@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/xheisenbugx/ksesh/agent"
+	"github.com/xheisenbugx/ksesh/kitty"
 	"github.com/xheisenbugx/ksesh/model"
 )
 
@@ -231,6 +232,35 @@ func TestNumbersGoToTheNthThread(t *testing.T) {
 	m, cmd = press(t, m, "5")
 	assert.Nil(t, cmd)
 	assert.Equal(t, "no thread 5: 4 in view", m.flash)
+}
+
+func TestResizeDocksASidebarAtTheNewWidth(t *testing.T) {
+	m, b := newModel(t)
+	m.opts.Dock = kitty.SidebarOpts{Edge: "left", Size: "34", Command: []string{"/bin/ksesh", "sidebar"}}
+	want := kitty.SidebarOpts{Edge: "left", Size: "38", Command: []string{"/bin/ksesh", "sidebar"}}
+	b.EXPECT().LastWorkWindow(9).Return(1, nil).Once()
+	b.EXPECT().OpenSidebar(1, want).Return(12, nil).Once()
+	b.EXPECT().FocusPlain(12).Return(nil).Once()
+
+	m, cmd := press(t, m, ">")
+	_, again := press(t, m, ">")
+	assert.Nil(t, again, "one at a time")
+	msg := cmd().(doneMsg)
+	require.NoError(t, msg.err)
+	assert.True(t, msg.quit, "the old one goes")
+
+	st := LoadState(m.opts.StatePath)
+	assert.Equal(t, "38", st.Width, "new sidebars open at it")
+	assert.Contains(t, st.Launch, "--dock-size=38", "the watcher's too")
+}
+
+func TestResizeKeepsAWidthToWorkIn(t *testing.T) {
+	m, _ := newModel(t)
+	m.opts.Dock = kitty.SidebarOpts{Command: []string{"ksesh", "sidebar"}}
+	m, _ = update(m, tea.WindowSizeMsg{Width: minWidth, Height: 26})
+	m, cmd := press(t, m, "<")
+	assert.Nil(t, cmd)
+	assert.Equal(t, "as narrow as it goes", m.flash)
 }
 
 func ids(agents []*model.Agent) []int {

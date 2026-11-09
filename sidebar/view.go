@@ -707,6 +707,7 @@ func (m Model) helpLines() []string {
 		entry("/", "filter; esc clears it"),
 		entry("o", "group the inbox by session"),
 		entry("f", "this session, all"),
+		entry("< >", "narrower, wider"),
 		entry("q", "hide everywhere"),
 		"",
 		"  " + m.th.mute("any key to go back"),

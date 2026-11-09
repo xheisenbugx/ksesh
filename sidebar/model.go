@@ -12,6 +12,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/xheisenbugx/ksesh/agent"
+	"github.com/xheisenbugx/ksesh/kitty"
 	"github.com/xheisenbugx/ksesh/model"
 )
 
@@ -32,6 +33,7 @@ type Backend interface {
 	OverlayOn(windowID int, env []string, command []string) error
 	NewWindowInSession(opts model.KittyTabOpts) (string, error)
 	SendKeys(target string, command string) (string, error)
+	OpenSidebar(windowID int, opts kitty.SidebarOpts) (int, error)
 	Refresh()
 }
 
@@ -60,6 +62,9 @@ type Options struct {
 	Run func(dir string, args ...string) error
 	// Repos tells about the branch each thread is on. Nil shows none.
 	Repos Repos
+	// Dock is how the sidebar is docked, for < and > to dock it again at a
+	// new width: kitty can't resize a dock. Without a Command it can't.
+	Dock kitty.SidebarOpts
 }
 
 // How often the sidebar asks kitty what changed: often while it is on
@@ -161,6 +166,8 @@ type Model struct {
 	frame       int // of the working spinner
 	animating   bool
 	restart     bool
+	// resizing is set while the sidebar docks itself again at a new width.
+	resizing bool
 }
 
 func New(opts Options) Model {
@@ -323,6 +330,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case doneMsg:
+		m.resizing = false
 		if msg.err != nil {
 			m.say(msg.err.Error())
 			m.failed, m.until = true, m.opts.Now().Add(2*flashFor)
@@ -600,6 +608,10 @@ func (m Model) run(key string) (tea.Model, tea.Cmd) {
 		return m.prompt(modeFilter, m.filter)
 	case "1", "2", "3", "4", "5", "6", "7", "8", "9":
 		return m.gotoNth(int(key[0] - '0'))
+	case "<":
+		return m.resize(-resizeStep)
+	case ">":
+		return m.resize(resizeStep)
 	case "o":
 		m.stateSeq++
 		st, err := UpdateState(m.opts.StatePath, func(s *State) { s.Group = !s.Group })

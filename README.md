@@ -329,6 +329,7 @@ In the sidebar:
 | `/`          | filter by title, session or branch as you type; `enter` keeps it, `esc` clears it |
 | `o`          | group the inbox by session, like T3 Code's projects, and back |
 | `f`          | only this tab's session, or every session             |
+| `<` `>`      | narrow or widen the sidebar by 4 columns; new sidebars open at that width |
 | `q`          | hide the sidebar in every tab                         |
 
 The mouse works too, as in T3 Code. Hover a thread and its time gives way to
@@ -412,6 +413,12 @@ edge = "left"               # or "right"
 width = "38"                # columns, or a share of the tab: "20%"
 auto_settle_after_days = 7  # 0 never settles a thread on its own
 ```
+
+Once you resize a sidebar with `<` and `>`, its width is remembered in the
+sidebar's state and wins over `width`. kitty 0.50 can't resize a dock (they
+sit outside the layout `resize-window` works on), so the sidebar docks a new
+one at the new width and closes; sidebars already open in other tabs keep
+theirs until they are opened again.
 
 The sidebar is a window of its own, so it never counts as one of the session's
 windows. A tab's sidebar closes with the tab's last window, and kitty saves it

@@ -9,6 +9,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/xheisenbugx/ksesh/kitty"
 	"github.com/xheisenbugx/ksesh/model"
 )
 
@@ -166,6 +167,62 @@ func (m Model) gotoNth(n int) (tea.Model, tea.Cmd) {
 	m.keepCursor()
 	id := a.WindowID
 	return m, m.do("", nil, func(b Backend) error { return b.FocusWindow(id) })
+}
+
+// resizeStep is the columns < and > take from or give to the sidebar;
+// minWidth the fewest it keeps.
+const (
+	resizeStep = 4
+	minWidth   = 24
+)
+
+// resize makes the sidebar delta columns wider, and remembers the width
+// for every sidebar opened after. kitty 0.50 can't resize a dock (they are
+// outside the layout `kitten @ resize-window` works on), so the sidebar
+// docks a new one at the new width, with the focus if it had it, and quits.
+func (m Model) resize(delta int) (tea.Model, tea.Cmd) {
+	if m.resizing || m.width == 0 {
+		return m, nil
+	}
+	if len(m.opts.Dock.Command) == 0 {
+		m.say("can't dock a sidebar from here")
+		return m, nil
+	}
+	width := max(m.width+delta, minWidth)
+	if width == m.width {
+		m.say("as narrow as it goes")
+		return m, nil
+	}
+	m.resizing = true
+	dock := m.opts.Dock
+	dock.Size = strconv.Itoa(width)
+	path, self, focused, b := m.opts.StatePath, m.opts.Self, m.focused, m.opts.Backend
+	return m, func() tea.Msg {
+		if _, err := UpdateState(path, func(s *State) {
+			s.Width = dock.Size
+			s.Launch = kitty.SidebarLaunchArgs(dock)
+		}); err != nil {
+			return doneMsg{err: err}
+		}
+		work, err := b.LastWorkWindow(self)
+		if err != nil {
+			return doneMsg{err: err}
+		}
+		if work == 0 {
+			return doneMsg{flash: dock.Size + " columns from the next sidebar on"}
+		}
+		id, err := b.OpenSidebar(work, dock)
+		if err != nil {
+			return doneMsg{err: err}
+		}
+		if focused {
+			if err := b.FocusPlain(id); err != nil {
+				return doneMsg{err: err}
+			}
+		}
+		// Its window closes with it.
+		return doneMsg{quit: true}
+	}
 }
 
 // defaultAgent is what a new thread starts without AgentCommand.

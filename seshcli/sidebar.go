@@ -1,6 +1,7 @@
 package seshcli
 
 import (
+	"cmp"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -48,15 +49,20 @@ func kseshCommand(cmd *cobra.Command) ([]string, error) {
 	return command, nil
 }
 
-// sidebarOpts is how sidebars are docked, running this very binary.
+// sidebarOpts is how sidebars are docked, running this very binary: as wide
+// as you last made one with < and >, else [sidebar] width.
 func sidebarOpts(cmd *cobra.Command, cfg model.Config) (kitty.SidebarOpts, error) {
 	command, err := kseshCommand(cmd)
 	if err != nil {
 		return kitty.SidebarOpts{}, err
 	}
+	size := cfg.Sidebar.Width
+	if path, err := sidebar.StatePath(); err == nil {
+		size = cmp.Or(sidebar.LoadState(path).Width, size)
+	}
 	return kitty.SidebarOpts{
 		Edge:    cfg.Sidebar.Edge,
-		Size:    cfg.Sidebar.Width,
+		Size:    size,
 		Command: append(command, "sidebar"),
 	}, nil
 }
@@ -104,7 +110,12 @@ Needs listen_on in kitty.conf: a TUI can't share its tty with remote control.`,
 			if p := os.Getenv("PATH"); p != "" {
 				env = append(env, "PATH="+p)
 			}
+			dock, err := sidebarOpts(cmd, deps.Config)
+			if err != nil {
+				return err
+			}
 			m := sidebar.New(sidebar.Options{
+				Dock:         dock,
 				Backend:      deps.Kitty,
 				Self:         self,
 				ThreadOpts:   threadOpts(deps.Config),
