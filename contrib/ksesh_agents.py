@@ -16,6 +16,8 @@
 from __future__ import annotations
 
 import base64
+import json
+import os
 import time
 from typing import Any
 
@@ -24,6 +26,11 @@ MSG_VAR = 'ksesh_msg'
 PROMPT_VAR = 'ksesh_prompt'
 TURN_AT_VAR = 'ksesh_turn_at'
 NAME_VAR = 'ksesh_name'
+# Thread triage, set by ksesh (see agent/thread.go in ksesh).
+SNOOZE_UNTIL_VAR = 'ksesh_snooze_until'
+SNOOZED_AT_VAR = 'ksesh_snoozed_at'
+WOKE_VAR = 'ksesh_woke'
+ROLE_VAR = 'ksesh_role'
 
 # Most urgent first. The icons are single-cell Font Awesome glyphs from a nerd
 # font, the same ones `ksesh list -i` uses; the colors are Catppuccin Mocha.
@@ -54,9 +61,19 @@ def _status(window: Any) -> str:
     return window.user_vars.get(STATUS_VAR, '')
 
 
+def _snoozed(window: Any) -> bool:
+    """Snoozed and not due yet: put away until then."""
+    try:
+        return time.time() < float(window.user_vars.get(SNOOZE_UNTIL_VAR, ''))
+    except ValueError:
+        return False
+
+
 def _most_urgent(windows: Any) -> str:
     best = ''
     for w in windows:
+        if _snoozed(w):
+            continue  # put away: it doesn't need you yet
         s = _status(w)
         if PRIORITY.get(s, 0) > PRIORITY.get(best, 0):
             best = s
@@ -106,7 +123,7 @@ def attention(boss: Any, current_session: str) -> list[tuple[str, str]]:
     for w in boss.all_windows:
         status = _status(w)
         native = w.created_in_session_name
-        if status not in STRIP or not native or native == current_session:
+        if status not in STRIP or not native or native == current_session or _snoozed(w):
             continue
         if PRIORITY[status] > PRIORITY.get(by_session.get(native, ''), 0):
             by_session[native] = status
@@ -231,11 +248,98 @@ def on_set_user_var(boss: Any, window: Any, data: dict[str, Any]) -> None:
 
 
 def on_focus_change(boss: Any, window: Any, data: dict[str, Any]) -> None:
+    if not data.get('focused'):
+        return
     # A finished agent you've looked at no longer needs you. Waiting and
     # failed ones still do, until they move on.
-    if data.get('focused') and _status(window) == 'done':
+    if _status(window) == 'done':
         window.set_user_var(STATUS_VAR, 'idle')
         _close_notification(window)
+    # Nor does the "woke" mark of a thread back from a snooze, once seen.
+    uv = window.user_vars
+    if uv.get(WOKE_VAR) or (uv.get(SNOOZE_UNTIL_VAR) and not _snoozed(window)):
+        for name in (WOKE_VAR, SNOOZE_UNTIL_VAR, SNOOZED_AT_VAR):
+            window.set_user_var(name, None)
+    _ensure_sidebar(boss, window)
+
+
+# The thread sidebar. ---------------------------------------------------------
+#
+# `ksesh sidebar toggle` docks a sidebar to the tab you are in, and records in
+# ~/.local/state/ksesh/sidebar.json that it is on and how to launch one. A
+# tab-dock belongs to its tab, so every tab you go to after that gets its own
+# here, until `ksesh sidebar toggle` turns it off again.
+
+_sidebar_state: dict[str, Any] = {}
+
+
+def _sidebar_path() -> str:
+    base = os.environ.get('XDG_STATE_HOME') or os.path.join(os.path.expanduser('~'), '.local', 'state')
+    return os.path.join(base, 'ksesh', 'sidebar.json')
+
+
+def _sidebar_launch() -> list[str]:
+    """The launch command when the sidebar is on, [] when it is off."""
+    path = _sidebar_path()
+    try:
+        mtime = os.stat(path).st_mtime
+    except OSError:
+        return []
+    if _sidebar_state.get('mtime') != mtime:
+        try:
+            with open(path) as f:
+                _sidebar_state['data'] = json.load(f)
+        except (OSError, ValueError):
+            _sidebar_state['data'] = {}
+        _sidebar_state['mtime'] = mtime
+    data = _sidebar_state.get('data') or {}
+    return list(data.get('launch') or []) if data.get('enabled') else []
+
+
+def _ensure_sidebar(boss: Any, window: Any) -> None:
+    launch = _sidebar_launch()
+    if not launch or window.user_vars.get(ROLE_VAR) == 'sidebar':
+        return
+    # `ls` of the window's tab is what tells docks apart reliably: they are
+    # listed among the tab's windows.
+    try:
+        out = boss.call_remote_control(window, ('ls', '--match-tab', f'window_id:{window.id}'))
+        tabs = [t for osw in json.loads(out if isinstance(out, str) else '[]') for t in osw.get('tabs', [])]
+    except Exception:
+        return
+    for tab in tabs:
+        windows = tab.get('windows', [])
+        if not any(w.get('id') == window.id for w in windows):
+            continue
+        sidebars = [w for w in windows if (w.get('user_vars') or {}).get(ROLE_VAR) == 'sidebar']
+        if sidebars:
+            # Back in front: have it look again now rather than at its next
+            # (slow, while hidden) refresh.
+            import signal
+
+            for w in sidebars:
+                pid = w.get('pid')
+                # Never 0 or less: that would signal kitty's own process group,
+                # and kitty reloads its config on SIGUSR1.
+                if isinstance(pid, int) and pid > 0:
+                    try:
+                        os.kill(pid, signal.SIGUSR1)
+                    except OSError:
+                        pass
+            return
+        # --match picks the tab; it goes before the "--" ending the options.
+        args = (launch[0], '--match', f'window_id:{window.id}', *launch[1:])
+        try:
+            boss.call_remote_control(window, args)
+            # The dock opens without the focus but still becomes the tab's
+            # active window, which would also make "threads" the tab's title.
+            # Keep the window you came to active.
+            boss.call_remote_control(window, ('focus-window', '--match', f'id:{window.id}'))
+        except Exception as e:
+            from kitty.utils import log_error
+
+            log_error(f'ksesh: could not open the sidebar: {e}')
+        return
 
 
 def on_close(boss: Any, window: Any, data: dict[str, Any]) -> None:
