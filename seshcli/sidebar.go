@@ -128,6 +128,7 @@ Needs listen_on in kitty.conf: a TUI can't share its tty with remote control.`,
 				AgentCommand: deps.Worktree.AgentCommand,
 				Run:          runKsesh(ksesh),
 				Repos:        newSidebarRepos(deps),
+				OpenURL:      deps.Browser.Open,
 			}
 			// Read kitty from the snapshot contrib/ksesh_snapshot.py keeps,
 			// and look again when it changes, rather than every sidebar

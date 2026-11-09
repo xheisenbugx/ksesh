@@ -72,6 +72,9 @@ type Options struct {
 	Run func(dir string, args ...string) error
 	// Repos tells about the branch each thread is on. Nil shows none.
 	Repos Repos
+	// OpenURL opens a URL in the browser, such as a thread's pull request.
+	// Nil can't.
+	OpenURL func(url string) error
 	// Dock is how the sidebar is docked, for < and > to dock it again at a
 	// new width: kitty can't resize a dock. Without a Command it can't.
 	Dock kitty.SidebarOpts
@@ -745,6 +748,8 @@ func (m Model) run(key string) (tea.Model, tea.Cmd) {
 		}
 	case "d":
 		return m.review()
+	case "P":
+		return m.openPR()
 	case "n":
 		return m.startNewThread(false)
 	case "N":
@@ -988,8 +993,8 @@ func (m Model) keyConfirmClose(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 }
 
 // click is a mouse click: on a row, it opens it; on one of a thread's
-// buttons, it does what the button does; a right click opens the thread's
-// menu. With a menu open, a click picks from it, or closes it.
+// buttons, it does what the button does; on its pull request, it opens that
+// in the browser; a right click opens the thread's menu. With a menu open, a click picks from it, or closes it.
 func (m Model) click(msg tea.MouseClickMsg) (tea.Model, tea.Cmd) {
 	if m.mode == modeMenu {
 		if i, ok := m.menu.itemAt(msg.X, msg.Y); ok {
@@ -1025,6 +1030,9 @@ func (m Model) click(msg tea.MouseClickMsg) (tea.Model, tea.Cmd) {
 		if i := m.buttonAt(r, msg.X); i >= 0 {
 			return m.buttons(r)[i].run(m)
 		}
+	}
+	if r.kind == rowThread && nth == 1 && m.onPRLabel(r, msg.X) {
+		return m.openPR()
 	}
 	return m.activate()
 }

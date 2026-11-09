@@ -1,6 +1,7 @@
 package sidebar
 
 import (
+	"strconv"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
@@ -83,6 +84,8 @@ func (p popup) itemAt(x, y int) (int, bool) {
 //	│  Approve          a │
 //	│  Deny             x │
 //	│  Reply…           r │
+//	│  Review changes   d │
+//	│  Open PR #12      P │
 //	├──────────────────────┤
 //	│  Close window…    X │
 //	╰──────────────────────╯
@@ -100,7 +103,11 @@ func (m Model) threadMenu(a *model.Agent) []action {
 		resume.hint = "↵"
 		forget := byKey(iconForget, "Forget…", "X")
 		forget.danger = true
-		return []action{resume, separator, forget}
+		items := []action{resume}
+		if pr, ok := m.pullRequest(a); ok {
+			items = append(items, m.prAction(pr))
+		}
+		return append(items, separator, forget)
 	}
 	section := agent.SectionOf(a, m.now, m.opts.ThreadOpts)
 	status := agent.Status(a.Status)
@@ -139,7 +146,11 @@ func (m Model) threadMenu(a *model.Agent) []action {
 	case agent.Working:
 		items = append(items, byKey(iconInterrupt, "Interrupt", "x"))
 	}
-	items = append(items, byKey(iconReply, "Reply…", "r"), byKey(iconReview, "Review changes", "d"), byKey(iconRename, "Rename…", "R"), separator)
+	items = append(items, byKey(iconReply, "Reply…", "r"), byKey(iconReview, "Review changes", "d"))
+	if pr, ok := m.pullRequest(a); ok {
+		items = append(items, m.prAction(pr))
+	}
+	items = append(items, byKey(iconRename, "Rename…", "R"), separator)
 	items = append(items, byKey(iconNew, "New thread…", "n"))
 	if m.opts.Run != nil && a.Path != "" {
 		items = append(items, byKey(iconBranch, "New in a worktree…", "N"))
@@ -154,6 +165,12 @@ func (m Model) threadMenu(a *model.Agent) []action {
 		items = append(items, archive)
 	}
 	return items
+}
+
+// prAction opens a thread's pull request in the browser.
+func (m Model) prAction(pr model.PullRequestState) action {
+	icon, _ := prIcon(pr)
+	return byKey(icon, "Open PR #"+strconv.Itoa(pr.Number), "P")
 }
 
 // snoozeAction opens the snooze times in place of the menu it is in.
