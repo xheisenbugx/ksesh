@@ -1,6 +1,8 @@
 package sidebar
 
 import (
+	"slices"
+
 	"github.com/xheisenbugx/ksesh/agent"
 	"github.com/xheisenbugx/ksesh/model"
 )
@@ -21,6 +23,9 @@ const (
 	rowFill
 	// rowRule is the line over the shelves.
 	rowRule
+	// rowGroup names the session of the inbox threads under it, when the
+	// inbox is grouped by session.
+	rowGroup
 )
 
 type row struct {
@@ -32,6 +37,8 @@ type row struct {
 	// holdsCurrent marks a closed shelf's header when the thread you're on
 	// is folded away in it.
 	holdsCurrent bool
+	// session is a rowGroup's.
+	session string
 }
 
 func (r row) selectable() bool {
@@ -121,4 +128,38 @@ func layout(board agent.Board, expanded map[agent.Section]bool, allSettled bool,
 		rows = append(rows, tray...)
 	}
 	return rows
+}
+
+// groupInbox groups the inbox's threads by session, under a row naming each,
+// the way T3 Code groups threads by project. The session with the latest
+// activity comes first, and each keeps its threads in inbox order.
+//
+//	INBOX ─────────────────── 3
+//	 api ──────────────────── 2
+//	  …its threads
+//	 docs ─────────────────── 1
+func groupInbox(rows []row) []row {
+	start := slices.IndexFunc(rows, func(r row) bool { return r.kind == rowThread && r.section == agent.Active })
+	if start < 0 {
+		return rows
+	}
+	end := start
+	for end < len(rows) && rows[end].kind == rowThread && rows[end].section == agent.Active {
+		end++
+	}
+	var order []string
+	bySession := map[string][]row{}
+	for _, r := range rows[start:end] {
+		s := r.agent.Session
+		if _, ok := bySession[s]; !ok {
+			order = append(order, s)
+		}
+		bySession[s] = append(bySession[s], r)
+	}
+	grouped := slices.Clone(rows[:start])
+	for _, s := range order {
+		grouped = append(grouped, row{kind: rowGroup, section: agent.Active, session: s, count: len(bySession[s])})
+		grouped = append(grouped, bySession[s]...)
+	}
+	return append(grouped, rows[end:]...)
 }

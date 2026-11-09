@@ -52,6 +52,8 @@ func kinds(rows []row) string {
 			b.WriteString("~")
 		case rowRule:
 			b.WriteString("-")
+		case rowGroup:
+			b.WriteString("{" + r.session + "}")
 		}
 	}
 	return b.String()

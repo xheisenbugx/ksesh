@@ -84,6 +84,8 @@ const (
 	modeNewThread
 	modeNewBranch
 	modeNewWorktree
+	// modeFilter filters the threads as you type.
+	modeFilter
 	modeConfirmClose
 	// modeConfirmArchive asks before removing a thread's worktree.
 	modeConfirmArchive
@@ -126,6 +128,9 @@ type Model struct {
 	ask string
 	// fresh is where a new thread is being started.
 	fresh newThread
+	// filter keeps only the threads whose title, session or branch has
+	// every one of its words.
+	filter string
 	// branches is what is known of the branch checked out in each thread's
 	// directory, by directory.
 	branches map[string]*branchInfo
@@ -347,7 +352,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch m.mode {
 		case modeSnooze:
 			return m.keySnooze(msg)
-		case modeSnoozeCustom, modeReply, modeRename, modeNewThread, modeNewBranch, modeNewWorktree:
+		case modeSnoozeCustom, modeReply, modeRename, modeNewThread, modeNewBranch, modeNewWorktree, modeFilter:
 			return m.keyInput(msg)
 		case modeConfirmClose:
 			return m.keyConfirmClose(msg)
@@ -374,11 +379,18 @@ func (m Model) board() agent.Board {
 	if m.state.Session && m.session != "" {
 		agents = slices.DeleteFunc(slices.Clone(agents), func(a *model.Agent) bool { return a.Session != m.session })
 	}
+	if m.filter != "" {
+		agents = slices.DeleteFunc(slices.Clone(agents), func(a *model.Agent) bool { return !m.matches(a) })
+	}
 	return agent.Arrange(agents, m.now, m.opts.ThreadOpts)
 }
 
 func (m Model) rows() []row {
-	return layout(m.board(), m.state.Expanded, m.allSettled, m.current)
+	rows := layout(m.board(), m.state.Expanded, m.allSettled, m.current)
+	if m.state.Group {
+		rows = groupInbox(rows)
+	}
+	return rows
 }
 
 // spinning reports whether a working spinner is on screen to animate.
@@ -578,7 +590,23 @@ func (m Model) run(key string) (tea.Model, tea.Cmd) {
 			return m.activate()
 		}
 	case "esc", "h", "left":
+		if key == "esc" && m.filter != "" {
+			m.filter = ""
+			m.keepCursor()
+			return m, nil
+		}
 		return m, m.backToWork()
+	case "/":
+		return m.prompt(modeFilter, m.filter)
+	case "o":
+		m.stateSeq++
+		st, err := UpdateState(m.opts.StatePath, func(s *State) { s.Group = !s.Group })
+		if err != nil {
+			m.say(err.Error())
+		} else {
+			m.state = st
+			m.keepCursor()
+		}
 	case "p":
 		return m.pin()
 	case "s":

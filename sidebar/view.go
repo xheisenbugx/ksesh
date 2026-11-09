@@ -38,6 +38,13 @@ const (
 	iconRobot  = "" // robot
 )
 
+// iconFolder stands for a session, over its threads in the grouped inbox;
+// iconSearch for the filter.
+const (
+	iconFolder = ""
+	iconSearch = ""
+)
+
 // here marks the thread you're on, and the closed shelf hiding it;
 // unreadMark a thread that finished while you weren't looking.
 const (
@@ -188,7 +195,11 @@ func (m Model) title() []string {
 		scope = m.session
 	}
 	left := " " + m.th.mute(scope)
-	if m.loaded {
+	switch {
+	case m.loaded && m.filter != "":
+		// How many of them the filter keeps.
+		left += m.th.dim(" · ") + m.th.accented("/"+m.filter) + " " + m.th.mute(strconv.Itoa(len(m.board().Ordered(agent.Sections...))))
+	case m.loaded:
 		left += m.th.dim(" · ") + m.th.mute(strconv.Itoa(len(m.agents)))
 	}
 	var right []string
@@ -261,6 +272,8 @@ func (m Model) renderRow(r row) []string {
 		return []string{paint(m.bar(r)+"   "+m.th.mute(fmt.Sprintf("⋯ %d more", r.count)), bg, m.width)}
 	case rowHeader:
 		return []string{m.renderHeader(r, bg)}
+	case rowGroup:
+		return []string{m.renderGroup(r)}
 	}
 	return m.renderThread(r, bg)
 }
@@ -268,7 +281,10 @@ func (m Model) renderRow(r row) []string {
 // renderEmpty is the inbox with nothing in it, centered.
 func (m Model) renderEmpty(r row) []string {
 	icon, head, sub := fg(ansicolor.Green, iconDone), "All caught up", "nothing needs you"
-	if r.none {
+	switch {
+	case m.filter != "":
+		icon, head, sub = m.th.mute(iconSearch), "Nothing in the inbox", "matches /"+m.filter+", esc clears it"
+	case r.none:
 		icon, head, sub = m.th.mute(iconRobot), "No agents yet", "n starts one here"
 	}
 	center := func(s string) string {
@@ -323,6 +339,18 @@ func (m Model) renderHeader(r row, bg string) string {
 	}
 	left := m.bar(r) + m.th.mute(caret) + " " + icon + " " + name
 	return paint(spread(left, right, m.width), bg, m.width)
+}
+
+// renderGroup names the session of the inbox threads under it, its rule
+// running to their count:
+//
+//	api ─────────────────── 2
+func (m Model) renderGroup(r row) string {
+	name := cmpOr(r.session, "no session")
+	label := "  " + m.th.mute(iconFolder) + " " + m.th.head(name) + " "
+	count := " " + m.th.mute(strconv.Itoa(r.count)) + " "
+	rule := max(m.width-ansi.StringWidth(label)-ansi.StringWidth(count), 0)
+	return paint(label+m.th.dim(strings.Repeat("─", rule))+count, "", m.width)
 }
 
 func badgeIcon(badge agent.Badge) (string, int) {
@@ -405,7 +433,8 @@ const minSubtitle = 10
 //	api · Added a Threads section   docs ↑2  #12
 func (m Model) subtitle(a *model.Agent, section agent.Section, badge agent.Badge) string {
 	where := a.Session
-	if where == title(a) {
+	// Grouped, the inbox says each thread's session once, over them.
+	if where == title(a) || (m.state.Group && section == agent.Active) {
 		where = ""
 	}
 	what, color := "", 0
@@ -635,7 +664,11 @@ func (m Model) footer() []string {
 	if !m.focused {
 		return append(lines, line(""))
 	}
-	return append(lines, m.hintLine(m.hints()))
+	hints := m.hints()
+	if m.filter != "" {
+		hints = append([]hint{{"esc", "unfilter"}}, hints...)
+	}
+	return append(lines, m.hintLine(hints))
 }
 
 // helpLines is the help screen, shown in place of the list.
@@ -670,6 +703,8 @@ func (m Model) helpLines() []string {
 		entry("A", "archive: remove its worktree"),
 		"",
 		section("Sidebar"),
+		entry("/", "filter; esc clears it"),
+		entry("o", "group the inbox by session"),
 		entry("f", "this session, all"),
 		entry("q", "hide everywhere"),
 		"",

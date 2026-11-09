@@ -6,6 +6,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/xheisenbugx/ksesh/agent"
+	"github.com/xheisenbugx/ksesh/model"
 )
 
 // inputs are the questions the footer asks: its label over the line you
@@ -17,6 +18,7 @@ var inputs = map[mode]struct{ label, placeholder string }{
 	modeNewThread:    {"New thread", "what to do, or empty"},
 	modeNewBranch:    {"New worktree", "its branch, e.g. feat/login"},
 	modeNewWorktree:  {"New thread", "what to do, or empty"},
+	modeFilter:       {"Filter", "title, session or branch"},
 }
 
 // prompt asks in the footer, starting from value.
@@ -31,6 +33,10 @@ func (m Model) prompt(md mode, value string) (Model, tea.Cmd) {
 func (m Model) keyInput(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "esc":
+		if m.mode == modeFilter {
+			m.filter = ""
+			m.keepCursor()
+		}
 		m.mode = modeNormal
 		m.input.Blur()
 		return m, nil
@@ -43,7 +49,28 @@ func (m Model) keyInput(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	}
 	var cmd tea.Cmd
 	m.input, cmd = m.input.Update(msg)
+	if m.mode == modeFilter {
+		// As you type.
+		m.filter = strings.TrimSpace(m.input.Value())
+		m.keepCursor()
+	}
 	return m, cmd
+}
+
+// matches reports whether a thread has every word of the filter in its
+// title, session or branch, in any case.
+func (m Model) matches(a *model.Agent) bool {
+	text := title(a) + " " + a.Session
+	if info, ok := m.branchOf(a); ok {
+		text += " " + info.status.Branch
+	}
+	text = strings.ToLower(text)
+	for _, word := range strings.Fields(strings.ToLower(m.filter)) {
+		if !strings.Contains(text, word) {
+			return false
+		}
+	}
+	return true
 }
 
 // submit does what was typed in answer to an input mode's question.
@@ -92,6 +119,9 @@ func (m Model) submit(md mode, text string) (tea.Model, tea.Cmd) {
 		return m, cmd
 	case modeNewWorktree:
 		return m, m.launchWorktree(strings.TrimSpace(text))
+	case modeFilter:
+		m.filter = strings.TrimSpace(text)
+		m.keepCursor()
 	}
 	return m, nil
 }

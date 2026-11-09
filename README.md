@@ -325,6 +325,8 @@ In the sidebar:
 | `R`          | rename the thread; empty goes back to the agent's title |
 | `X`          | close the agent's window (asks first)                 |
 | `A`          | archive a thread in a worktree of its own: `ksesh wt rm` removes the worktree, its branch and session, then the window closes (asks first; wt rm's refusal of uncommitted changes shows in the status bar) |
+| `/`          | filter by title, session or branch as you type; `enter` keeps it, `esc` clears it |
+| `o`          | group the inbox by session, like T3 Code's projects, and back |
 | `f`          | only this tab's session, or every session             |
 | `q`          | hide the sidebar in every tab                         |
 
@@ -405,9 +407,9 @@ auto_settle_after_days = 7  # 0 never settles a thread on its own
 The sidebar is a window of its own, so it never counts as one of the session's
 windows. A tab's sidebar closes with the tab's last window, and kitty saves it
 with the tab in session files. Sidebars of tabs in the background refresh every
-5 seconds instead of every second. Whether the sidebar is on and which shelves
-are open is shared by every tab's sidebar, in
-`~/.local/state/ksesh/sidebar.json`.
+5 seconds instead of every second. Whether the sidebar is on, which shelves
+are open and whether the inbox is grouped are shared by every tab's sidebar,
+in `~/.local/state/ksesh/sidebar.json`; a filter is the one sidebar's.
 
 ## Worktrees
 

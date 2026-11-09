@@ -3,6 +3,7 @@ package sidebar
 import (
 	"strings"
 	"testing"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
@@ -150,6 +151,70 @@ func TestTheMastheadsPlusStartsANewThread(t *testing.T) {
 	assert.Contains(t, ansi.Strip(m.footer()[1]), "new thread")
 	m, _ = update(m, tea.MouseClickMsg{X: 33, Y: 0, Button: tea.MouseLeft})
 	assert.Equal(t, modeNewThread, m.mode)
+}
+
+func TestFilterAsYouType(t *testing.T) {
+	m, _ := newModel(t)
+	m, _ = press(t, m, "/")
+	require.Equal(t, modeFilter, m.mode)
+	m = typeText(t, m, "DOC")
+	view := ansi.Strip(m.View().Content)
+	assert.Contains(t, view, "Write docs", "in any case")
+	assert.NotContains(t, view, "Fix the login")
+	assert.Contains(t, view, "/DOC 1", "the masthead says how many it keeps")
+	a, ok := m.selectedAgent()
+	require.True(t, ok, "the cursor moves to what is left")
+	assert.Equal(t, 2, a.WindowID)
+
+	m, _ = press(t, m, "enter")
+	assert.Equal(t, modeNormal, m.mode)
+	assert.Equal(t, "DOC", m.filter, "enter keeps it")
+	assert.Contains(t, ansi.Strip(m.footer()[1]), "esc unfilter")
+
+	m, cmd := press(t, m, "esc")
+	assert.Nil(t, cmd, "esc clears the filter before it leaves the sidebar")
+	assert.Empty(t, m.filter)
+	assert.Contains(t, ansi.Strip(m.View().Content), "Fix the login")
+}
+
+func TestEscInTheFilterClearsIt(t *testing.T) {
+	m, _ := newModel(t)
+	m, _ = press(t, m, "/")
+	m = typeText(t, m, "nothing like it")
+	assert.Contains(t, ansi.Strip(m.View().Content), "Nothing in the inbox")
+	m, _ = press(t, m, "esc")
+	assert.Equal(t, modeNormal, m.mode)
+	assert.Empty(t, m.filter)
+}
+
+func TestFilterMatchesSessionsAndBranches(t *testing.T) {
+	m, _ := newModel(t)
+	m.agents[1].Session = "web"
+	m.agents[1].Path = "/w/2"
+	m.branches["/w/2"] = &branchInfo{ok: true, status: model.BranchStatus{Branch: "feat/login-redirect"}}
+	m.filter = "web redirect"
+	got := m.board().Ordered(agent.Sections...)
+	require.Len(t, got, 1, "every word, in the session or the branch")
+	assert.Equal(t, 2, got[0].WindowID)
+}
+
+func TestGroupTheInboxBySession(t *testing.T) {
+	m, _ := newModel(t)
+	m.agents[1].Session = "docs" // 2, the newest
+	m.agents = append(m.agents, thread(7, "Old login bug", "idle", 3*time.Minute, model.Thread{}))
+
+	m, _ = press(t, m, "o")
+	assert.True(t, m.state.Group)
+	assert.True(t, LoadState(m.opts.StatePath).Group, "remembered for every sidebar")
+	assert.Equal(t, "[p]3[a]{docs}2{api}17~-[w][s][s]", kinds(m.rows()), "the session with the latest activity first")
+
+	view := ansi.Strip(m.View().Content)
+	assert.Contains(t, view, " docs ─")
+	assert.NotContains(t, view, "api · Allow Bash", "the group says the session, the threads don't")
+	assert.Contains(t, view, "Allow Bash")
+
+	m, _ = press(t, m, "o")
+	assert.Equal(t, "[p]3[a]217~-[w][s][s]", kinds(m.rows()))
 }
 
 func TestRename(t *testing.T) {
