@@ -28,15 +28,24 @@ func threadOpts(cfg model.Config) agent.ThreadOpts {
 	return opts
 }
 
-// sidebarOpts is how sidebars are docked, running this very binary.
-func sidebarOpts(cmd *cobra.Command, cfg model.Config) (kitty.SidebarOpts, error) {
+// kseshCommand runs this very binary, with the config it was given.
+func kseshCommand(cmd *cobra.Command) ([]string, error) {
 	exe, err := os.Executable()
 	if err != nil {
-		return kitty.SidebarOpts{}, err
+		return nil, err
 	}
 	command := []string{exe}
 	if configPath, _ := cmd.Root().PersistentFlags().GetString("config"); configPath != "" {
 		command = append(command, "--config", configPath)
+	}
+	return command, nil
+}
+
+// sidebarOpts is how sidebars are docked, running this very binary.
+func sidebarOpts(cmd *cobra.Command, cfg model.Config) (kitty.SidebarOpts, error) {
+	command, err := kseshCommand(cmd)
+	if err != nil {
+		return kitty.SidebarOpts{}, err
 	}
 	return kitty.SidebarOpts{
 		Edge:    cfg.Sidebar.Edge,
@@ -83,12 +92,19 @@ Needs listen_on in kitty.conf: a TUI can't share its tty with remote control.`,
 				return err
 			}
 			exe, _ := os.Executable()
+			ksesh, _ := kseshCommand(cmd)
+			var env []string
+			if p := os.Getenv("PATH"); p != "" {
+				env = append(env, "PATH="+p)
+			}
 			m := sidebar.New(sidebar.Options{
 				Backend:    deps.Kitty,
 				Self:       self,
 				ThreadOpts: threadOpts(deps.Config),
 				StatePath:  path,
 				Changed:    rebuilt(exe),
+				Ksesh:      ksesh,
+				Env:        env,
 			})
 			prog := tea.NewProgram(m)
 			// contrib/ksesh_agents.py sends SIGUSR1 when the sidebar's tab

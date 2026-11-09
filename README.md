@@ -164,7 +164,7 @@ reviewed: everything since it left its base (origin's default branch), so
 commits, uncommitted changes and new files alike, with the files not committed
 yet marked `●`. The diff is drawn with line numbers and tinted backgrounds, and
 goes through [delta](https://github.com/dandavison/delta) instead when it is
-installed.
+installed. `--pager` pages it in `less`.
 
 [`contrib/ksesh-agents-fzf`](contrib/ksesh-agents-fzf) is a live picker over
 them (it refreshes every 2 seconds), with the agent's screen, or its git diff,
@@ -307,6 +307,7 @@ In the sidebar:
 | `u`          | undo the last pin, settle, snooze or wake             |
 | `m`          | the thread's menu, also a right click                 |
 | `a` `x` `r`  | approve, deny or interrupt, reply, without switching  |
+| `d`          | review it: `ksesh agent diff --pager` over the window beside the sidebar |
 | `R`          | rename the thread; empty goes back to the agent's title |
 | `X`          | close the agent's window (asks first)                 |
 | `f`          | only this tab's session, or every session             |

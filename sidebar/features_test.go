@@ -47,6 +47,27 @@ func TestUnreadThreadsAreMarked(t *testing.T) {
 	assert.Contains(t, strings.Join(m.renderThread(row{kind: rowThread, section: agent.Active, agent: a}, ""), "\n"), bold("Write docs"))
 }
 
+func TestReviewOpensOverTheWindowBesideTheSidebar(t *testing.T) {
+	m, b := newModel(t)
+	m.opts.Ksesh = []string{"/bin/ksesh", "--config", "/c.toml"}
+	m.opts.Env = []string{"PATH=/bin"}
+	m, _ = press(t, m, "k") // thread 2, done
+	assert.Contains(t, ansi.Strip(m.footer()[1]), "d review", "offered for a finished thread")
+
+	b.EXPECT().LastWorkWindow(9).Return(5, nil).Once()
+	b.EXPECT().OverlayOn(5, []string{"PATH=/bin"}, []string{"/bin/ksesh", "--config", "/c.toml", "agent", "diff", "2", "--pager"}).Return(nil).Once()
+	_, cmd := press(t, m, "d")
+	msg := cmd().(doneMsg)
+	assert.NoError(t, msg.err)
+}
+
+func TestReviewNeedsAWindowToOpenOver(t *testing.T) {
+	m, b := newModel(t)
+	b.EXPECT().LastWorkWindow(9).Return(0, nil).Once()
+	_, cmd := press(t, m, "d")
+	assert.ErrorContains(t, cmd().(doneMsg).err, "no window beside the sidebar")
+}
+
 func TestRename(t *testing.T) {
 	m, b := newModel(t)
 	m, _ = press(t, m, "R")

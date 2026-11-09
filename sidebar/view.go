@@ -521,7 +521,10 @@ func (m Model) hints() []hint {
 	if agent.BadgeOf(a, m.now) == agent.BadgeWoke {
 		return []hint{{"↵", "go"}, {"w", "dismiss"}, {"s", "settle"}, {"?", "keys"}}
 	}
-	return []hint{{"↵", "go"}, {"s", "settle"}, {"p", pin}, {"z", "snooze"}, {"?", "keys"}}
+	if agent.Status(a.Status) == agent.Done {
+		return []hint{{"↵", "go"}, {"d", "review"}, {"s", "settle"}, {"p", pin}, {"?", "keys"}}
+	}
+	return []hint{{"↵", "go"}, {"s", "settle"}, {"p", pin}, {"z", "snooze"}, {"d", "review"}, {"?", "keys"}}
 }
 
 // key is a key as the footer and the help show it.
@@ -603,6 +606,7 @@ func (m Model) helpLines() []string {
 		entry("a", "approve"),
 		entry("x", "deny, interrupt"),
 		entry("r", "reply"),
+		entry("d", "review its changes"),
 		entry("R", "rename the thread"),
 		entry("X", "close its window"),
 		"",

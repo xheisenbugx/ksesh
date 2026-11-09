@@ -29,6 +29,7 @@ type Backend interface {
 	SendText(windowID int, text string, enter bool) error
 	CloseWindow(windowID int) error
 	CloseSidebars() error
+	OverlayOn(windowID int, env []string, command []string) error
 	Refresh()
 }
 
@@ -43,6 +44,11 @@ type Options struct {
 	// Changed reports whether ksesh was rebuilt since the sidebar started,
 	// so it can restart into the new one. Nil never restarts.
 	Changed func() bool
+	// Ksesh runs this ksesh: the binary and the flags it was given (--config),
+	// for what the sidebar opens in other windows, like a review.
+	Ksesh []string
+	// Env is NAME=VALUE pairs for those, such as the sidebar's PATH.
+	Env []string
 }
 
 // How often the sidebar asks kitty what changed: often while it is on
@@ -565,6 +571,8 @@ func (m Model) run(key string) (tea.Model, tea.Cmd) {
 		if _, ok := m.selectedAgent(); ok {
 			return m.prompt(modeReply, "")
 		}
+	case "d":
+		return m.review()
 	case "R":
 		if a, ok := m.selectedAgent(); ok {
 			return m.prompt(modeRename, a.CustomTitle)

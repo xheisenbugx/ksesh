@@ -1,7 +1,9 @@
 package seshcli
 
 import (
+	"bytes"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"strconv"
@@ -50,28 +52,55 @@ preview's, the terminal's, or --width.`,
 				return err
 			}
 			out := cmd.OutOrStdout()
+			var paged bytes.Buffer
+			pager, _ := cmd.Flags().GetBool("pager")
+			if pager {
+				out = &paged
+			}
 			delta, _ := exec.LookPath("delta")
 			maxLines, _ := cmd.Flags().GetInt("max-file-lines")
 			opts := review.Options{Width: width, StatOnly: statOnly, MaxFileLines: maxLines}
 			if statOnly || noDelta || delta == "" || r.Patch == "" {
 				fmt.Fprintln(out, review.Render(r, opts))
-				return nil
+			} else {
+				opts.StatOnly = true
+				fmt.Fprintln(out, review.Render(r, opts))
+				fmt.Fprintln(out)
+				d := exec.Command(delta, "--paging=never", "--line-numbers", "--width="+strconv.Itoa(width))
+				d.Stdin = strings.NewReader(r.Patch + "\n")
+				d.Stdout, d.Stderr = out, cmd.ErrOrStderr()
+				if err := d.Run(); err != nil {
+					return err
+				}
 			}
-			opts.StatOnly = true
-			fmt.Fprintln(out, review.Render(r, opts))
-			fmt.Fprintln(out)
-			d := exec.Command(delta, "--paging=never", "--line-numbers", "--width="+strconv.Itoa(width))
-			d.Stdin = strings.NewReader(r.Patch + "\n")
-			d.Stdout, d.Stderr = out, cmd.ErrOrStderr()
-			return d.Run()
+			if pager {
+				return page(paged.String(), cmd.OutOrStdout(), cmd.ErrOrStderr())
+			}
+			return nil
 		},
 	}
+	cmd.Flags().Bool("pager", false, "page it in less, as the sidebar's d does")
 	cmd.Flags().String("base", "", "ref to compare against (default: origin's default branch)")
 	cmd.Flags().Bool("stat", false, "only the summary: branch, commits and files")
 	cmd.Flags().Bool("no-delta", false, "draw the diff with ksesh even when delta is installed")
 	cmd.Flags().Int("max-file-lines", 0, "fold the diff of files with more changed lines than this (0: never)")
 	cmd.Flags().IntP("width", "w", 0, "columns to draw in (default: fzf preview or terminal width)")
 	return cmd
+}
+
+// page shows text in less, keeping its colors, or prints it without less.
+func page(text string, out, errOut io.Writer) error {
+	less, err := exec.LookPath("less")
+	if err != nil {
+		_, err := io.WriteString(out, text)
+		return err
+	}
+	// -R keeps the colors; -+F undoes an F in $LESS, which would quit at once
+	// on a review that fits on screen, closing an overlay before you read it.
+	p := exec.Command(less, "-R", "-+F")
+	p.Stdin = strings.NewReader(text)
+	p.Stdout, p.Stderr = out, errOut
+	return p.Run()
 }
 
 // outputWidth is the fzf preview's width when ksesh draws one, the
