@@ -284,6 +284,23 @@ func BadgeOf(a *model.Agent, now time.Time) Badge {
 	return Badge(a.Status)
 }
 
+// IsUnread reports whether a thread finished, or failed, while you weren't
+// looking at it, and you haven't been to its window since: like an unread
+// thread in T3 Code. A finished one is "done" until then (kitty's watcher,
+// contrib/ksesh_agents.py, turns it idle when you focus the window, or as it
+// finishes in front of you). A failed one stays failed until the agent moves
+// on, so it is unread until the watcher saw you at its window after it
+// failed.
+func IsUnread(a *model.Agent) bool {
+	switch Status(a.Status) {
+	case Done:
+		return true
+	case Error:
+		return a.Since != nil && a.SeenAt.Before(*a.Since)
+	}
+	return false
+}
+
 // SnoozePreset is one of the "snooze until" choices.
 type SnoozePreset struct {
 	Key   string // what `ksesh agent snooze` takes

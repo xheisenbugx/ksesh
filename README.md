@@ -265,7 +265,10 @@ Each thread shows the title its agent gave it (or the one you gave it with
 it last did something, and under that its session and what it needs, did or
 is on. Titles
 of threads that need you are bold, and a waiting or failed agent's message is
-colored. Working agents spin, a closed shelf holding the thread you're in shows
+colored. A thread that finished or failed while you weren't looking is
+**unread**, marked with an accent `•` at its left, until you go to its window
+(the watcher turns "done" idle then, and records when it saw you in
+`ksesh_seen_at`). Working agents spin, a closed shelf holding the thread you're in shows
 its `●`, and the status bar only offers the keys that do something for the
 selected thread.
 

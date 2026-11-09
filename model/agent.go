@@ -26,6 +26,9 @@ type Agent struct {
 	Prompt  string     `json:"prompt,omitempty"`
 	// TurnAt is when the agent started on its current prompt.
 	TurnAt *time.Time `json:"turn_at,omitempty"`
+	// SeenAt is when you last looked at the agent's window, as far as kitty's
+	// watcher saw (contrib/ksesh_agents.py).
+	SeenAt time.Time `json:"seen_at,omitzero"`
 	// Created is when the window was opened.
 	Created time.Time `json:"created,omitzero"`
 	// Focused is the window the user is in; LastFocused orders windows by

@@ -1,12 +1,15 @@
 package sidebar
 
 import (
+	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/xheisenbugx/ksesh/agent"
 )
 
 // typeText types text into whatever has the keyboard, a key at a time.
@@ -26,6 +29,22 @@ func refreshes(b *MockBackend) {
 	b.EXPECT().LastWorkWindow(9).Return(1, nil).Maybe()
 	b.EXPECT().WindowState(9).Return(true, true, nil).Maybe()
 	b.EXPECT().GetCurrentSession().Return("api", nil).Maybe()
+}
+
+func TestUnreadThreadsAreMarked(t *testing.T) {
+	m, _ := newModel(t)
+	view := ansi.Strip(m.View().Content)
+	check, _ := agent.GlyphFor(agent.Done)
+	assert.Contains(t, view, unreadMark+check.Icon+" Write docs", "finished while you were away")
+	assert.NotContains(t, view, unreadMark+" ")
+	for _, line := range strings.Split(view, "\n") {
+		if strings.Contains(line, "Fix the login") || strings.Contains(line, "Refactor") {
+			assert.NotContains(t, line, unreadMark)
+		}
+	}
+	a := m.agents[1]
+	require.Equal(t, 2, a.WindowID)
+	assert.Contains(t, strings.Join(m.renderThread(row{kind: rowThread, section: agent.Active, agent: a}, ""), "\n"), bold("Write docs"))
 }
 
 func TestRename(t *testing.T) {

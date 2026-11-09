@@ -22,6 +22,10 @@ const (
 	TurnAtVar   = "ksesh_turn_at"
 	// TitleVar is a title you gave the thread, shown instead of the window's.
 	TitleVar = "ksesh_title"
+	// SeenAtVar is when you last focused the window, set by kitty's watcher
+	// (contrib/ksesh_agents.py): what tells a failure you saw from one you
+	// didn't.
+	SeenAtVar = "ksesh_seen_at"
 
 	// Thread triage (see agent/thread.go). Times are unix seconds.
 	PinVar         = "ksesh_pin"
@@ -263,6 +267,9 @@ func agentOf(w lsWindow) (*model.Agent, bool) {
 	if at, err := strconv.ParseInt(w.UserVars[TurnAtVar], 10, 64); err == nil {
 		turn := time.Unix(at, 0)
 		a.TurnAt = &turn
+	}
+	if at, err := strconv.ParseInt(w.UserVars[SeenAtVar], 10, 64); err == nil {
+		a.SeenAt = time.Unix(at, 0)
 	}
 	return a, true
 }

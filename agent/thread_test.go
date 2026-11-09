@@ -227,3 +227,16 @@ func TestParseSnooze(t *testing.T) {
 		assert.Error(t, err, bad)
 	}
 }
+
+func TestIsUnread(t *testing.T) {
+	assert.True(t, IsUnread(thread(1, Done, time.Minute, model.Thread{})), "done until you go to it")
+	assert.False(t, IsUnread(thread(1, Idle, time.Minute, model.Thread{})))
+	assert.False(t, IsUnread(thread(1, Waiting, time.Minute, model.Thread{})), "waiting needs you, but there is nothing to read")
+
+	failed := thread(1, Error, time.Minute, model.Thread{})
+	assert.True(t, IsUnread(failed), "failed while you were away")
+	failed.SeenAt = now.Add(-30 * time.Second)
+	assert.False(t, IsUnread(failed), "and you've been to it since")
+	failed.SeenAt = now.Add(-time.Hour)
+	assert.True(t, IsUnread(failed), "seen before it failed")
+}

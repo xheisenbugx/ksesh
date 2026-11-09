@@ -28,8 +28,12 @@ const (
 	iconRobot  = "" // robot
 )
 
-// here marks the thread you're on, and the closed shelf hiding it.
-const here = "●"
+// here marks the thread you're on, and the closed shelf hiding it;
+// unreadMark a thread that finished while you weren't looking.
+const (
+	here       = "●"
+	unreadMark = "•"
+)
 
 // spinner animates the icon of working threads.
 var spinner = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
@@ -320,9 +324,12 @@ func badgeIcon(badge agent.Badge) (string, int) {
 //
 //	▌ ⠹ Fix the login flow        2m ●
 //	    api · Allow Bash: npm test
+//	 •✓ Write the README          5m
 //
-// The accent bar is the selection, the dot the thread you're on; the title
-// is bold when it needs you, muted when put away (snoozed, settled).
+// The accent bar is the selection, the dot at the right the thread you're
+// on, the one at the left a thread that finished while you weren't looking
+// (unread); the title is bold when it needs you, muted when put away
+// (snoozed, settled).
 func (m Model) renderThread(r row, bg string) []string {
 	a, section := r.agent, r.section
 	badge := agent.BadgeOf(a, m.now)
@@ -355,16 +362,20 @@ func (m Model) renderThread(r row, bg string) []string {
 	// bar, space, icon, space | title | space, right
 	room := max(m.width-4-1-ansi.StringWidth(right), 1)
 	name := ansi.Truncate(title(a), room, "…")
-	needsYou := badge == agent.Badge(agent.Waiting) || badge == agent.Badge(agent.Error) ||
-		badge == agent.Badge(agent.Done) || badge == agent.BadgeWoke
+	unread := !putAway && agent.IsUnread(a)
+	needsYou := unread || badge == agent.Badge(agent.Waiting) || badge == agent.Badge(agent.Error) || badge == agent.BadgeWoke
 	switch {
 	case putAway:
 		name = m.th.mute(name)
 	case needsYou:
 		name = bold(name)
 	}
+	mark := " "
+	if unread {
+		mark = m.th.accented(unreadMark)
+	}
 	gap := strings.Repeat(" ", max(room-ansi.StringWidth(ansi.Strip(name)), 0)+1)
-	first := bar + " " + iconText + " " + name + gap + right
+	first := bar + mark + iconText + " " + name + gap + right
 	second := bar + "   " + m.subtitle(a, section, badge)
 	return []string{paint(first, bg, m.width), paint(second, bg, m.width), paint("", "", m.width)}
 }

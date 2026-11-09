@@ -157,7 +157,8 @@ func TestSetTitle(t *testing.T) {
 	require.NoError(t, k.SetTitle(2, "Auth rework"))
 	require.NoError(t, k.SetTitle(2, ""), "empty unsets it")
 
-	a, ok := agentOf(lsWindow{ID: 2, Title: "claude", UserVars: map[string]string{StatusVar: "idle", TitleVar: "Auth rework"}})
+	a, ok := agentOf(lsWindow{ID: 2, Title: "claude", UserVars: map[string]string{StatusVar: "idle", TitleVar: "Auth rework", SeenAtVar: "1700000000"}})
 	require.True(t, ok)
 	assert.Equal(t, "Auth rework", a.CustomTitle)
+	assert.Equal(t, int64(1700000000), a.SeenAt.Unix(), "when the watcher saw you at it")
 }
