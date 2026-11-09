@@ -32,6 +32,7 @@ func NewRootCommand(version string) *cobra.Command {
 		NewWindowCommand(base),
 		NewWorktreeCommand(base),
 		NewAgentCommand(base),
+		NewSidebarCommand(base),
 	)
 
 	return rootCmd

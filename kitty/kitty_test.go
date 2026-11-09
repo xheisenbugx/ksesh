@@ -208,6 +208,18 @@ func TestNewWindowInSession(t *testing.T) {
 	assert.Equal(t, "window:9", target)
 }
 
+func TestNewWindowInSessionStartsInTheSessionsRoot(t *testing.T) {
+	k, mShell := newKitty(t, "4", model.Config{})
+	mShell.EXPECT().CmdCapture("kitten", "@", "launch", "--type=tab",
+		"--add-to-session", "notes", "--match", "id:4", "--keep-focus",
+		"--cwd", "/home/dev/notes/daily", "--var", "ksesh_root=/home/dev/notes/daily",
+		"--var", "ksesh_name=Second Brain").
+		Return("9", nil)
+
+	_, err := k.NewWindowInSession(model.KittyTabOpts{TargetSession: "Second Brain", Background: true})
+	require.NoError(t, err)
+}
+
 func TestSendKeys(t *testing.T) {
 	k, mShell := newKitty(t, "4", model.Config{})
 	mShell.EXPECT().CmdCapture("kitten", "@", "send-text", "--match", "id:1", "--", `printf 'a\\nb'\r`).Return("", nil)

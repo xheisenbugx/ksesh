@@ -20,15 +20,17 @@ type (
 	}
 
 	lsTab struct {
-		ID       int        `json:"id"`
-		IsActive bool       `json:"is_active"`
-		Title    string     `json:"title"`
-		Windows  []lsWindow `json:"windows"`
+		ID        int        `json:"id"`
+		IsActive  bool       `json:"is_active"`
+		IsFocused bool       `json:"is_focused"`
+		Title     string     `json:"title"`
+		Windows   []lsWindow `json:"windows"`
 	}
 
 	lsWindow struct {
 		ID                  int               `json:"id"`
 		IsActive            bool              `json:"is_active"`
+		IsFocused           bool              `json:"is_focused"`
 		Title               string            `json:"title"`
 		Cwd                 string            `json:"cwd"`
 		Cmdline             []string          `json:"cmdline"`
@@ -109,6 +111,12 @@ func (k *RealKitty) load() (*state, error) {
 	if cached != nil {
 		return cached, nil
 	}
+	if st, ok := k.loadSnapshot(); ok {
+		k.mu.Lock()
+		k.state = st
+		k.mu.Unlock()
+		return st, nil
+	}
 	out, err := k.rc("ls")
 	if err != nil {
 		return nil, err
@@ -128,6 +136,12 @@ func parseState(raw string, selfID int) (*state, error) {
 	if err := json.Unmarshal([]byte(raw), &osWindows); err != nil {
 		return nil, fmt.Errorf("couldn't parse kitten @ ls output: %w", err)
 	}
+	return buildState(osWindows, selfID), nil
+}
+
+// buildState makes sense of kitty's windows, from `kitten @ ls` or its
+// snapshot (see snapshot.go).
+func buildState(osWindows []lsOSWindow, selfID int) *state {
 	st := &state{osWindows: osWindows}
 
 	byNative := map[string]*sessionState{}
@@ -136,7 +150,9 @@ func parseState(raw string, selfID int) (*state, error) {
 		for _, tab := range osw.Tabs {
 			var tabOf map[*sessionState]*tabState
 			for _, w := range tab.Windows {
-				if w.SessionName == "" {
+				// A sidebar isn't one of the session's windows, even when kitty
+				// added it to the session it was opened in.
+				if w.SessionName == "" || isSidebar(w) {
 					continue
 				}
 				sess, ok := byNative[w.SessionName]
@@ -165,7 +181,7 @@ func parseState(raw string, selfID int) (*state, error) {
 	sortSessions(order)
 	st.sessions = order
 	st.currentID, st.current = st.findCurrent(selfID, byNative)
-	return st, nil
+	return st
 }
 
 // add folds one of the session's windows into it.
@@ -192,7 +208,10 @@ func (s *sessionState) add(w lsWindow, tabID int, selfID int) {
 	if w.HasActivity && !contains(s.alerts, "activity") {
 		s.alerts = append(s.alerts, "activity")
 	}
-	s.agentStatus = agent.MostUrgent(s.agentStatus, windowStatus(w))
+	// A snoozed agent is put away: it doesn't make its session need you.
+	if !agent.IsSnoozed(threadOf(w.UserVars), time.Now()) {
+		s.agentStatus = agent.MostUrgent(s.agentStatus, windowStatus(w))
+	}
 }
 
 // finish settles what can only be known once every window has been seen.
@@ -265,13 +284,13 @@ func (st *state) findCurrent(selfID int, byNative map[string]*sessionState) (int
 // key binding (`launch --type=overlay ksesh picker`) looks like, since kitty
 // only carries the session over to windows launched with --cwd=current.
 func sessionOf(w lsWindow, tab lsTab, byNative map[string]*sessionState) *sessionState {
-	if w.SessionName != "" {
+	if w.SessionName != "" && !isSidebar(w) {
 		return byNative[w.SessionName]
 	}
 	var best *lsWindow
 	for i := range tab.Windows {
 		other := &tab.Windows[i]
-		if other.SessionName == "" {
+		if other.SessionName == "" || isSidebar(*other) {
 			continue
 		}
 		if best == nil || other.LastFocusedAt > best.LastFocusedAt {

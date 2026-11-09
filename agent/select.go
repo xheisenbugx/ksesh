@@ -2,6 +2,7 @@ package agent
 
 import (
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 	"unicode"
@@ -45,6 +46,29 @@ func CleanTitle(title string) string {
 		return title
 	}
 	return trimmed
+}
+
+// Title is what a thread is called: the title you gave it, else the title the
+// agent gave its window (Claude Code's is a summary of the conversation),
+// unless it is only the agent's own name, then its session.
+func Title(a *model.Agent) string {
+	if a.CustomTitle != "" {
+		return a.CustomTitle
+	}
+	for _, t := range []string{a.Title, a.TabTitle} {
+		t = CleanTitle(t)
+		if t != "" && !strings.EqualFold(t, a.Name) && !strings.EqualFold(t, "Claude Code") {
+			return t
+		}
+	}
+	if a.Session != "" {
+		return a.Session
+	}
+	if a.Path != "" {
+		parts := strings.Split(strings.TrimRight(a.Path, "/"), "/")
+		return parts[len(parts)-1]
+	}
+	return "window " + strconv.Itoa(a.WindowID)
 }
 
 func since(a *model.Agent) time.Time {

@@ -6,6 +6,7 @@ import (
 	"strconv"
 
 	"github.com/xheisenbugx/ksesh/git"
+	"github.com/xheisenbugx/ksesh/model"
 	"github.com/xheisenbugx/ksesh/shell"
 )
 
@@ -37,6 +38,10 @@ type Github interface {
 	// PrURL returns the URL of the pull request for the branch checked out in
 	// dir. found is false (with nil error) when the branch has no PR.
 	PrURL(dir string) (url string, found bool, err error)
+	// PrState returns the state of the pull request for the branch checked
+	// out in dir, merged and closed ones included. found is false (with nil
+	// error) when the branch has none.
+	PrState(dir string) (pr model.PullRequestState, found bool, err error)
 	// PrCheckout runs `gh pr checkout` inside dir (a worktree).
 	PrCheckout(dir string, repo string, number int) (string, error)
 	// Issue returns the GitHub issue for the branch checked out at path.
@@ -106,6 +111,25 @@ func (g *RealGithub) PrURL(dir string) (string, bool, error) {
 		return "", false, nil
 	}
 	return out, true, nil
+}
+
+func (g *RealGithub) PrState(dir string) (model.PullRequestState, bool, error) {
+	// Without a number, gh finds the branch's pull request, the open one
+	// first, then a merged or closed one.
+	out, err := g.shell.CmdInDir(dir, "gh", "pr", "view", "--json", "number,state,isDraft,url")
+	if err != nil || out == "" {
+		return model.PullRequestState{}, false, nil
+	}
+	var raw struct {
+		Number  int    `json:"number"`
+		State   string `json:"state"`
+		IsDraft bool   `json:"isDraft"`
+		URL     string `json:"url"`
+	}
+	if err := json.Unmarshal([]byte(out), &raw); err != nil {
+		return model.PullRequestState{}, false, err
+	}
+	return model.PullRequestState{Number: raw.Number, State: raw.State, Draft: raw.IsDraft, URL: raw.URL}, raw.Number != 0, nil
 }
 
 var issueNumberRe = regexp.MustCompile(`\d+`)

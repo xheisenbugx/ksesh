@@ -1,6 +1,7 @@
 package kitty
 
 import (
+	"cmp"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -66,8 +67,10 @@ func (k *RealKitty) NewWindowInSession(opts model.KittyTabOpts) (string, error) 
 	if opts.Name != "" {
 		args = append(args, "--tab-title", opts.Name)
 	}
-	if opts.StartDir != "" {
-		args = append(args, "--cwd", opts.StartDir)
+	// Without a directory, the tab starts in the session's root rather than
+	// wherever kitty itself runs.
+	if dir := cmp.Or(opts.StartDir, sess.root); dir != "" {
+		args = append(args, "--cwd", dir)
 	}
 	if sess.root != "" {
 		args = append(args, "--var", RootVar+"="+sess.root)

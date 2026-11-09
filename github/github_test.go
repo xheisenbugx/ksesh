@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/xheisenbugx/ksesh/git"
+	"github.com/xheisenbugx/ksesh/model"
 	"github.com/xheisenbugx/ksesh/shell"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -21,6 +22,24 @@ func TestPrViewFound(t *testing.T) {
 	assert.True(t, found)
 	assert.Equal(t, "octocat", pr.Author)
 	assert.Equal(t, []int{42}, pr.ClosingIssues)
+}
+
+func TestPrState(t *testing.T) {
+	s := shell.NewMockShell(t)
+	s.EXPECT().CmdInDir("/w/login", "gh", "pr", "view", "--json", "number,state,isDraft,url").
+		Return(`{"number":12,"state":"MERGED","isDraft":false,"url":"https://github.com/o/r/pull/12"}`, nil)
+	s.EXPECT().CmdInDir("/w/new", "gh", "pr", "view", "--json", "number,state,isDraft,url").
+		Return("", fmt.Errorf("no pull requests found for branch \"new\""))
+	g := NewGithub(s, git.NewMockGit(t))
+
+	pr, found, err := g.PrState("/w/login")
+	require.NoError(t, err)
+	assert.True(t, found)
+	assert.Equal(t, model.PullRequestState{Number: 12, State: model.PRMerged, URL: "https://github.com/o/r/pull/12"}, pr)
+
+	_, found, err = g.PrState("/w/new")
+	require.NoError(t, err)
+	assert.False(t, found, "no pull request is not an error")
 }
 
 func TestPrViewNotAPr(t *testing.T) {

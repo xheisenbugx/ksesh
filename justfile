@@ -10,6 +10,10 @@ mock:
 test: mock
     go test -cover -race ./... -coverprofile=coverage.out
 
+# Test the kitty-side Python in contrib/, with kitty's modules stubbed out
+test-contrib:
+    python3 -B -m unittest discover -s contrib/tests
+
 # The packages that carry benchmarks, and the parameters the numbers are only
 # meaningful under: -benchtime=100ms is where these benchmarks hold to +-1%,
 # and -count=6 is what benchstat wants. Both match CI. See CONTRIBUTING.md.

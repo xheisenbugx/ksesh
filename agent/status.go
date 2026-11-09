@@ -4,16 +4,19 @@
 // An agent reports its state through user variables on its own kitty window,
 // set by `ksesh agent hook` from the agent's hooks:
 //
-//	ksesh_agent      the agent's name ("claude")
+//	ksesh_agent      the agent's name ("claude", "codex", "gemini")
 //	ksesh_status     working | waiting | done | error | idle
 //	ksesh_status_at  unix seconds of the last change
 //	ksesh_msg        why it is waiting, what it finished with, or the error
 //	ksesh_prompt     the prompt it is working on
 //	ksesh_turn_at    unix seconds it started on that prompt
+//	ksesh_conv       the conversation it is in (Claude Code's session_id),
+//	                 which ties the window to the thread history
 //
 // User variables live and die with the window, show up in `kitten @ ls`, and
 // reach kitty's watchers and tab bar (contrib/ksesh_agents.py), so nothing has
-// to keep state anywhere else.
+// to keep state anywhere else while the window lasts. What should outlive it,
+// a conversation to resume, the thread history keeps (the threads package).
 package agent
 
 import (

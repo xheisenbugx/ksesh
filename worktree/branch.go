@@ -155,6 +155,46 @@ func shellQuote(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", `'"'"'`) + "'"
 }
 
+// AgentCommand is the agent to start in dir: the agent_command of its repo's
+// [[worktree]] block, DefaultAgentCommand without one.
+func (w *RealWorktree) AgentCommand(dir string) string {
+	if dir != "" {
+		if repo, err := w.repoAt(dir); err == nil && repo.cfg.AgentCommand != "" {
+			return repo.cfg.AgentCommand
+		}
+	}
+	return DefaultAgentCommand
+}
+
+// BranchStatus is where dir's branch stands against the repo's base branch,
+// the way `ksesh wt status` counts it, and which linked worktree dir is in.
+func (w *RealWorktree) BranchStatus(dir string) (model.BranchStatus, error) {
+	repo, err := w.repoAt(dir)
+	if err != nil {
+		return model.BranchStatus{}, err
+	}
+	ok, branch, err := w.git.CurrentBranch(dir)
+	if err != nil || !ok {
+		return model.BranchStatus{}, fmt.Errorf("no branch in %s: %v", dir, err)
+	}
+	var st model.BranchStatus
+	if branch = strings.TrimSpace(branch); branch != "HEAD" {
+		st.Branch = branch
+	}
+	if ok, top, err := w.git.ShowTopLevel(dir); err == nil && ok {
+		if top = strings.TrimSpace(top); !w.sameDir(top, repo.main) {
+			st.Worktree = top
+		}
+	}
+	base := w.base(repo, "")
+	if st.Branch != strings.TrimPrefix(base, "origin/") {
+		if ahead, behind, err := w.git.AheadBehind(dir, base); err == nil {
+			st.Base, st.Ahead, st.Behind = base, ahead, behind
+		}
+	}
+	return st, nil
+}
+
 // Worktrees lists the repo's worktrees, the main one first, with their state
 // when withStatus is set.
 func (w *RealWorktree) Worktrees(withStatus bool) ([]model.GitWorktree, error) {

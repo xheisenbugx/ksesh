@@ -83,6 +83,10 @@ type Kitty interface {
 	// SetAgentStatus writes an agent's status onto a window, the one ksesh
 	// runs in when windowID is 0.
 	SetAgentStatus(windowID int, u agent.Update) error
+	// UpdateAgent is SetAgentStatus, also returning the window as the update
+	// left it (its title, session and thread) when it had to read it, for
+	// the thread history; nil when it didn't.
+	UpdateAgent(windowID int, u agent.Update) (*model.Agent, error)
 	// ListAgents lists the agents running in kitty windows.
 	ListAgents() ([]*model.Agent, error)
 	// FocusWindow switches to a window, through its session.
@@ -95,6 +99,28 @@ type Kitty interface {
 	SendKey(windowID int, keys ...string) error
 	// CaptureWindow returns a window's screen.
 	CaptureWindow(windowID int) (string, error)
+	// SetThread writes a thread's triage state (pinned, snoozed, settled)
+	// onto its agent's window.
+	SetThread(windowID int, t model.Thread) error
+	// SetTitle gives a thread a title of your own; empty clears it.
+	SetTitle(windowID int, title string) error
+	// SidebarTab is the sidebar of the tab holding windowID, 0 for none.
+	SidebarTab(windowID int) (int, error)
+	// OpenSidebar docks a thread sidebar to the tab holding windowID.
+	OpenSidebar(windowID int, opts SidebarOpts) (int, error)
+	// CloseSidebars closes the sidebar of every tab.
+	CloseSidebars() error
+	// FocusPlain focuses a window without going through its session.
+	FocusPlain(windowID int) error
+	// LastWorkWindow is the window last focused in windowID's tab that
+	// isn't a sidebar.
+	LastWorkWindow(windowID int) (int, error)
+	// WindowState reports whether a window's tab is the one on screen, and
+	// whether the window has the keyboard focus.
+	WindowState(windowID int) (shown, focused bool, err error)
+	// Refresh forgets the cached state of kitty.
+	OverlayOn(windowID int, env []string, command []string) error
+	Refresh()
 	// Freeze and Thaw bracket a TUI: see freeze.go.
 	Freeze(captures bool) error
 	Thaw() error
@@ -113,6 +139,13 @@ type RealKitty struct {
 
 	mu    sync.Mutex
 	state *state // cached `kitten @ ls`, dropped by every mutation
+
+	// See snapshot.go.
+	snapshotPath string
+	snapshotPID  int
+	snapshotErr  string    // why the snapshot was last passed over
+	mutatedAt    time.Time // when ksesh last changed kitty
+	clock        func() time.Time
 
 	// See Freeze.
 	frozen       bool
@@ -233,6 +266,9 @@ func (k *RealKitty) rc(args ...string) (string, error) {
 func (k *RealKitty) mutate(args ...string) (string, error) {
 	k.invalidate()
 	out, err := k.rc(args...)
+	k.mu.Lock()
+	k.mutatedAt = k.now()
+	k.mu.Unlock()
 	k.invalidate()
 	return out, err
 }

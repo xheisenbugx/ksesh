@@ -96,6 +96,17 @@ func TestCleanTitle(t *testing.T) {
 	assert.Equal(t, "✳", CleanTitle("✳"), "nothing left means nothing to clean")
 }
 
+func TestTitle(t *testing.T) {
+	a := &model.Agent{WindowID: 7, Title: "✳ Fix the login", Name: "claude", Session: "api"}
+	assert.Equal(t, "Fix the login", Title(a), "the agent's glyph is dropped")
+	a.CustomTitle = "Auth rework"
+	assert.Equal(t, "Auth rework", Title(a), "yours wins")
+	a.CustomTitle, a.Title = "", "claude"
+	assert.Equal(t, "api", Title(a), "only the agent's name: its session")
+	a.Session = ""
+	assert.Equal(t, "window 7", Title(a))
+}
+
 func TestSortIdleAndWorkingMostRecentFirst(t *testing.T) {
 	list := []*model.Agent{
 		{WindowID: 1, Status: "idle", Since: at(60 * 23)},
