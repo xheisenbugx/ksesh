@@ -683,6 +683,7 @@ func (m Model) helpLines() []string {
 		entry("esc h", "back to your window"),
 		entry("j k g G", "move"),
 		entry("tab", "next section"),
+		entry("1-9", "go to the nth thread"),
 		entry("n N", "new thread, in a worktree"),
 		"",
 		section("Triage"),

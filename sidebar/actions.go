@@ -153,6 +153,21 @@ func (m Model) archive(a *model.Agent, worktree string) tea.Cmd {
 	})
 }
 
+// gotoNth goes to the nth thread (from 1) of the sidebar's Order, as
+// `ksesh sidebar goto` does, of the threads it shows.
+func (m Model) gotoNth(n int) (tea.Model, tea.Cmd) {
+	threads := Order(m.board(), m.state.Group)
+	if n < 1 || n > len(threads) {
+		m.say(fmt.Sprintf("no thread %d: %d in view", n, len(threads)))
+		return m, nil
+	}
+	a := threads[n-1]
+	m.cursor = "t" + strconv.Itoa(a.WindowID)
+	m.keepCursor()
+	id := a.WindowID
+	return m, m.do("", nil, func(b Backend) error { return b.FocusWindow(id) })
+}
+
 // defaultAgent is what a new thread starts without AgentCommand.
 const defaultAgent = "claude"
 

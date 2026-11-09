@@ -217,6 +217,30 @@ func TestGroupTheInboxBySession(t *testing.T) {
 	assert.Equal(t, "[p]3[a]217~-[w][s][s]", kinds(m.rows()))
 }
 
+func TestNumbersGoToTheNthThread(t *testing.T) {
+	m, b := newModel(t)
+	// Pinned 3, the inbox 2 and 1, then the working 4; 5 and 6 are put away.
+	assert.Equal(t, []int{3, 2, 1, 4}, ids(Order(m.board(), false)))
+
+	b.EXPECT().FocusWindow(4).Return(nil).Once()
+	m, cmd := press(t, m, "4")
+	cmd()
+	r, _, _ := m.selected()
+	assert.Equal(t, "hworking", rowKey(r), "the cursor follows, to the shelf it is folded in")
+
+	m, cmd = press(t, m, "5")
+	assert.Nil(t, cmd)
+	assert.Equal(t, "no thread 5: 4 in view", m.flash)
+}
+
+func ids(agents []*model.Agent) []int {
+	var out []int
+	for _, a := range agents {
+		out = append(out, a.WindowID)
+	}
+	return out
+}
+
 func TestRename(t *testing.T) {
 	m, b := newModel(t)
 	m, _ = press(t, m, "R")

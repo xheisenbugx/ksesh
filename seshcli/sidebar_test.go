@@ -2,13 +2,16 @@ package seshcli
 
 import (
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/xheisenbugx/ksesh/cache"
 	"github.com/xheisenbugx/ksesh/github"
+	"github.com/xheisenbugx/ksesh/kitty"
 	"github.com/xheisenbugx/ksesh/model"
+	"github.com/xheisenbugx/ksesh/sidebar"
 )
 
 func TestCommandError(t *testing.T) {
@@ -38,6 +41,40 @@ func TestSidebarReposSharePullRequestsThroughTheirCache(t *testing.T) {
 	assert.Equal(t, model.PRMerged, pr.State)
 	_, found, _ = repos().PullRequest("/w/new", "new")
 	assert.False(t, found, "no pull request is remembered too")
+}
+
+func TestGotoFollowsTheSidebarsOrder(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	ago := func(d time.Duration) *time.Time { at := time.Now().Add(-d); return &at }
+	agents := []*model.Agent{
+		{WindowID: 1, Session: "api", Status: "idle", Since: ago(time.Minute)},
+		{WindowID: 2, Session: "web", Status: "done", Since: ago(2 * time.Minute)},
+		{WindowID: 3, Session: "api", Status: "idle", Since: ago(3 * time.Minute)},
+		{WindowID: 4, Session: "api", Status: "idle", Since: ago(time.Hour), Thread: model.Thread{Pin: 1}},
+		{WindowID: 5, Session: "api", Status: "idle", Since: ago(time.Minute), Thread: model.Thread{SnoozedUntil: time.Now().Add(time.Hour)}},
+	}
+	k := kitty.NewMockKitty(t)
+	k.EXPECT().ListAgents().Return(agents, nil)
+	deps := &Deps{Kitty: k}
+
+	k.EXPECT().FocusWindow(4).Return(nil).Once()
+	require.NoError(t, gotoThread(deps, 1), "pinned first")
+	k.EXPECT().FocusWindow(2).Return(nil).Once()
+	require.NoError(t, gotoThread(deps, 3), "then the inbox, newest first")
+	assert.EqualError(t, gotoThread(deps, 5), "no thread 5: the sidebar has 4", "the snoozed one is left out")
+
+	path, err := sidebar.StatePath()
+	require.NoError(t, err)
+	_, err = sidebar.UpdateState(path, func(s *sidebar.State) { s.Group = true })
+	require.NoError(t, err)
+	k.EXPECT().FocusWindow(3).Return(nil).Once()
+	require.NoError(t, gotoThread(deps, 3), "grouped by session, as the sidebar shows it")
+
+	_, err = sidebar.UpdateState(path, func(s *sidebar.State) { s.Session = true })
+	require.NoError(t, err)
+	k.EXPECT().GetCurrentSession().Return("web", nil)
+	k.EXPECT().FocusWindow(2).Return(nil).Once()
+	require.NoError(t, gotoThread(deps, 1), "only this session's")
 }
 
 func TestRunKsesh(t *testing.T) {

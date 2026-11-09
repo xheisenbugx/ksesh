@@ -598,6 +598,8 @@ func (m Model) run(key string) (tea.Model, tea.Cmd) {
 		return m, m.backToWork()
 	case "/":
 		return m.prompt(modeFilter, m.filter)
+	case "1", "2", "3", "4", "5", "6", "7", "8", "9":
+		return m.gotoNth(int(key[0] - '0'))
 	case "o":
 		m.stateSeq++
 		st, err := UpdateState(m.opts.StatePath, func(s *State) { s.Group = !s.Group })

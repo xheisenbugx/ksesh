@@ -147,19 +147,41 @@ func groupInbox(rows []row) []row {
 	for end < len(rows) && rows[end].kind == rowThread && rows[end].section == agent.Active {
 		end++
 	}
-	var order []string
-	bySession := map[string][]row{}
-	for _, r := range rows[start:end] {
-		s := r.agent.Session
-		if _, ok := bySession[s]; !ok {
-			order = append(order, s)
-		}
-		bySession[s] = append(bySession[s], r)
-	}
 	grouped := slices.Clone(rows[:start])
-	for _, s := range order {
-		grouped = append(grouped, row{kind: rowGroup, section: agent.Active, session: s, count: len(bySession[s])})
-		grouped = append(grouped, bySession[s]...)
+	for _, group := range bySession(rows[start:end], func(r row) string { return r.agent.Session }) {
+		grouped = append(grouped, row{kind: rowGroup, section: agent.Active, session: group[0].agent.Session, count: len(group)})
+		grouped = append(grouped, group...)
 	}
 	return append(grouped, rows[end:]...)
+}
+
+// bySession splits items into groups of one session each, in the order
+// their sessions first come up, keeping each group's items in order.
+func bySession[T any](items []T, session func(T) string) [][]T {
+	var order []string
+	groups := map[string][]T{}
+	for _, it := range items {
+		s := session(it)
+		if _, ok := groups[s]; !ok {
+			order = append(order, s)
+		}
+		groups[s] = append(groups[s], it)
+	}
+	out := make([][]T, 0, len(order))
+	for _, s := range order {
+		out = append(out, groups[s])
+	}
+	return out
+}
+
+// Order is the threads in the order the sidebar lists them, its inbox
+// grouped by session when group is set, leaving out the snoozed and settled
+// ones it keeps out of the way: what `ksesh sidebar next`, `prev` and `goto`
+// step through, and the sidebar's 1–9 pick from.
+func Order(board agent.Board, group bool) []*model.Agent {
+	inbox := board[agent.Active]
+	if group {
+		inbox = slices.Concat(bySession(inbox, func(a *model.Agent) string { return a.Session })...)
+	}
+	return slices.Concat(board[agent.Pinned], inbox, board[agent.SectionWorking])
 }

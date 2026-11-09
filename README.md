@@ -312,6 +312,7 @@ In the sidebar:
 | `enter` `l`  | go to the thread (or open/close a shelf), also a click |
 | `esc` `h`    | back to the window you were in                        |
 | `j` `k` `g` `G` `tab` | move; `tab` jumps to the next shelf          |
+| `1`–`9`      | go to the nth thread of the sidebar's order (below)   |
 | `n`          | new thread: asks what to do, then starts the agent (`agent_command`, default `claude`) on it in a new tab of the selected thread's session and directory, also the masthead's `+` |
 | `N`          | new thread in a new worktree: asks for a branch, then what to do, and runs `ksesh wt new <branch> -p …` in the selected thread's repo |
 | `p`          | pin or unpin; `K` `J` move a pin up or down            |
@@ -361,7 +362,12 @@ ksesh agent snooze 3h [window-id]     # or evening, tomorrow, next-week, 90m, 15
 ksesh agent wake [window-id]
 ksesh sidebar print [--json]          # the threads by section
 ksesh sidebar next / prev             # go down / up the sidebar's order
+ksesh sidebar goto 3                  # go to its third thread
 ```
+
+The sidebar's order, which `next`, `prev`, `goto` and the sidebar's `1`–`9`
+follow, is pinned, the inbox (grouped by session after `o`), then working,
+leaving out the snoozed and settled threads; after `f`, only this session's.
 
 `ksesh agent next` skips snoozed and settled threads, and so do the tab bar's
 badges and attention strip: you put those away.
@@ -380,6 +386,9 @@ map super+ctrl+z    launch --type=background --allow-remote-control ksesh agent 
 map super+ctrl+w    launch --type=background --allow-remote-control ksesh agent wake
 map super+ctrl+j    launch --type=background --allow-remote-control ksesh sidebar next
 map super+ctrl+k    launch --type=background --allow-remote-control ksesh sidebar prev
+map super+ctrl+1    launch --type=background --allow-remote-control ksesh sidebar goto 1
+map super+ctrl+2    launch --type=background --allow-remote-control ksesh sidebar goto 2
+# …and so on to 9
 ```
 
 Full-window pickers don't fit in the sidebar. Bind their keys twice, so that

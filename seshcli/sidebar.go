@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"slices"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -142,6 +143,7 @@ Needs listen_on in kitty.conf: a TUI can't share its tty with remote control.`,
 		newSidebarFocusCommand(base),
 		newSidebarStepCommand(base, "next", 1),
 		newSidebarStepCommand(base, "prev", -1),
+		newSidebarGotoCommand(base),
 		newSidebarPrintCommand(base),
 		newSidebarOverlayCommand(base),
 	)
@@ -344,14 +346,61 @@ func newSidebarFocusCommand(base *BaseDeps) *cobra.Command {
 }
 
 // sidebarOrder is the threads in the order the sidebar lists them, leaving
-// out the snoozed and settled ones, which it keeps out of the way.
+// out the snoozed and settled ones, which it keeps out of the way. Like the
+// sidebar, it keeps to this session's threads after f, and groups the inbox
+// by session after o.
 func sidebarOrder(deps *Deps) ([]*model.Agent, error) {
 	agents, err := deps.Kitty.ListAgents()
 	if err != nil {
 		return nil, err
 	}
+	var st sidebar.State
+	if path, err := sidebar.StatePath(); err == nil {
+		st = sidebar.LoadState(path)
+	}
+	if st.Session {
+		if current, err := deps.Kitty.GetCurrentSession(); err == nil && current != "" {
+			agents = slices.DeleteFunc(agents, func(a *model.Agent) bool { return a.Session != current })
+		}
+	}
 	board := agent.Arrange(agents, time.Now(), threadOpts(deps.Config))
-	return board.Ordered(agent.Pinned, agent.Active, agent.SectionWorking), nil
+	return sidebar.Order(board, st.Group), nil
+}
+
+func newSidebarGotoCommand(base *BaseDeps) *cobra.Command {
+	return &cobra.Command{
+		Use:   "goto <n>",
+		Short: "Go to the nth thread of the sidebar",
+		Long: `Go to the nth thread down the sidebar, from 1, in the order 'ksesh sidebar next'
+steps through: pinned, the inbox, then working, leaving out the snoozed and
+settled ones. 1 to 9 do the same in the sidebar. Bind it in kitty.conf:
+
+    map super+ctrl+1 launch --type=background --allow-remote-control ksesh sidebar goto 1`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			n, err := strconv.Atoi(args[0])
+			if err != nil || n < 1 {
+				return fmt.Errorf("goto takes a thread's place in the sidebar, from 1: %q", args[0])
+			}
+			deps, err := buildDeps(cmd, base)
+			if err != nil {
+				return err
+			}
+			return gotoThread(deps, n)
+		},
+	}
+}
+
+// gotoThread focuses the nth thread, from 1, of the sidebar's order.
+func gotoThread(deps *Deps, n int) error {
+	threads, err := sidebarOrder(deps)
+	if err != nil {
+		return err
+	}
+	if n > len(threads) {
+		return fmt.Errorf("no thread %d: the sidebar has %d", n, len(threads))
+	}
+	return deps.Kitty.FocusWindow(threads[n-1].WindowID)
 }
 
 func newSidebarStepCommand(base *BaseDeps, name string, delta int) *cobra.Command {
