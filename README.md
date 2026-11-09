@@ -203,8 +203,8 @@ In kitty itself, [`contrib/ksesh_agents.py`](contrib/ksesh_agents.py) adds:
   if it finishes while you're looking at it.
 
 Copy `contrib/ksesh_agents.py`, `contrib/ksesh_watcher.py`,
-`contrib/tab_bar.py` and `contrib/ksesh_reload.py` next to `kitty.conf`
-(merge `tab_bar.py` into yours if you have one), and add:
+`contrib/ksesh_snapshot.py`, `contrib/tab_bar.py` and `contrib/ksesh_reload.py`
+next to `kitty.conf` (merge `tab_bar.py` into yours if you have one), and add:
 
 ```conf
 watcher ksesh_watcher.py
@@ -219,8 +219,8 @@ map super+a       launch --type=overlay --cwd=current ~/.config/kitty/ksesh-agen
 
 kitty reads `tab_bar.py` and watchers once and keeps them until it quits.
 `kitten @ kitten ksesh_reload.py` loads new ones into the running kitty, so
-your sessions don't have to go. `ksesh_agents.py` itself is re-read whenever it
-changes. The hooks need `listen_on`: without a socket they do nothing rather
+your sessions don't have to go. `ksesh_agents.py` and `ksesh_snapshot.py`
+themselves are re-read whenever they change. The hooks need `listen_on`: without a socket they do nothing rather
 than talk to kitty over Claude's own terminal.
 
 ## Threads and the sidebar
@@ -382,10 +382,23 @@ auto_settle_after_days = 7  # 0 never settles a thread on its own
 
 The sidebar is a window of its own, so it never counts as one of the session's
 windows. A tab's sidebar closes with the tab's last window, and kitty saves it
-with the tab in session files. Sidebars of tabs in the background refresh every
-5 seconds instead of every second. Whether the sidebar is on and which shelves
-are open is shared by every tab's sidebar, in
-`~/.local/state/ksesh/sidebar.json`.
+with the tab in session files. Whether the sidebar is on and which shelves are
+open is shared by every tab's sidebar, in `~/.local/state/ksesh/sidebar.json`.
+
+The sidebars don't ask kitty what changed. The watcher's
+[`ksesh_snapshot.py`](contrib/ksesh_snapshot.py) writes what they need (what
+`kitten @ ls` says, less environment variables) to
+`~/.local/state/ksesh/kitty-<kitty's pid>.json` a tenth of a second after
+anything they show changes (a status, a title, the focus, a tab or window
+opening or closing, a command starting), and every 2 seconds for the rest (the
+program running in a window). The sidebars read it, and check it for a change
+5 times a second, so a change shows within about a third of a second however
+many tabs have one, for next to nothing (writing it takes kitty under a
+millisecond). Sidebars of tabs in the background check every 5 seconds. Right
+after a sidebar changes something itself, and whenever the file is missing or
+more than 6 seconds old (the watcher isn't loaded, or kitty quit), they ask
+kitty with `kitten @ ls` instead, every second (5 in the background), as they
+did before. Other ksesh commands always ask kitty.
 
 ## Worktrees
 

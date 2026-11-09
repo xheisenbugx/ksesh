@@ -111,6 +111,12 @@ func (k *RealKitty) load() (*state, error) {
 	if cached != nil {
 		return cached, nil
 	}
+	if st, ok := k.loadSnapshot(); ok {
+		k.mu.Lock()
+		k.state = st
+		k.mu.Unlock()
+		return st, nil
+	}
 	out, err := k.rc("ls")
 	if err != nil {
 		return nil, err
@@ -130,6 +136,12 @@ func parseState(raw string, selfID int) (*state, error) {
 	if err := json.Unmarshal([]byte(raw), &osWindows); err != nil {
 		return nil, fmt.Errorf("couldn't parse kitten @ ls output: %w", err)
 	}
+	return buildState(osWindows, selfID), nil
+}
+
+// buildState makes sense of kitty's windows, from `kitten @ ls` or its
+// snapshot (see snapshot.go).
+func buildState(osWindows []lsOSWindow, selfID int) *state {
 	st := &state{osWindows: osWindows}
 
 	byNative := map[string]*sessionState{}
@@ -169,7 +181,7 @@ func parseState(raw string, selfID int) (*state, error) {
 	sortSessions(order)
 	st.sessions = order
 	st.currentID, st.current = st.findCurrent(selfID, byNative)
-	return st, nil
+	return st
 }
 
 // add folds one of the session's windows into it.
