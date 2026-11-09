@@ -82,6 +82,20 @@ type (
 		Browser         BrowserConfig  `toml:"browser"`
 		Frecency        FrecencyConfig `toml:"frecency"`
 		TUI             TUIConfig      `toml:"tui"`
+		Sidebar         SidebarConfig  `toml:"sidebar"`
+	}
+
+	// SidebarConfig is [sidebar]: the thread sidebar docked to kitty's tabs
+	// (`ksesh sidebar`).
+	SidebarConfig struct {
+		// Edge is the edge of the tab it docks to: left (default) or right.
+		Edge string `toml:"edge"`
+		// Width is its width in columns, or a percentage of the tab ("20%").
+		// Empty means 38.
+		Width string `toml:"width"`
+		// AutoSettleAfterDays settles threads that haven't done anything for
+		// this many days. Unset means 7; 0 never settles one on its own.
+		AutoSettleAfterDays *int `toml:"auto_settle_after_days"`
 	}
 	Evaluation struct {
 		StrictMode bool `toml:"strict_mode"`

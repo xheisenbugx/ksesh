@@ -95,6 +95,26 @@ type Kitty interface {
 	SendKey(windowID int, keys ...string) error
 	// CaptureWindow returns a window's screen.
 	CaptureWindow(windowID int) (string, error)
+	// SetThread writes a thread's triage state (pinned, snoozed, settled)
+	// onto its agent's window.
+	SetThread(windowID int, t model.Thread) error
+	// SidebarTab is the sidebar of the tab holding windowID, 0 for none.
+	SidebarTab(windowID int) (int, error)
+	// OpenSidebar docks a thread sidebar to the tab holding windowID.
+	OpenSidebar(windowID int, opts SidebarOpts) (int, error)
+	// CloseSidebars closes the sidebar of every tab.
+	CloseSidebars() error
+	// FocusPlain focuses a window without going through its session.
+	FocusPlain(windowID int) error
+	// LastWorkWindow is the window last focused in windowID's tab that
+	// isn't a sidebar.
+	LastWorkWindow(windowID int) (int, error)
+	// WindowState reports whether a window's tab is the one on screen, and
+	// whether the window has the keyboard focus.
+	WindowState(windowID int) (shown, focused bool, err error)
+	// Refresh forgets the cached state of kitty.
+	OverlayOn(windowID int, env []string, command []string) error
+	Refresh()
 	// Freeze and Thaw bracket a TUI: see freeze.go.
 	Freeze(captures bool) error
 	Thaw() error

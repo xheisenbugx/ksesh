@@ -81,8 +81,14 @@ func TestSessionsCarryTheirMostUrgentAgent(t *testing.T) {
 	assert.Equal(t, "", byName["web"], "an agent found by its program reports nothing")
 }
 
+// windowLs is `kitten @ ls --match id:7` for a window with these user vars.
+func windowLs(vars string) string {
+	return `[{"id":1,"tabs":[{"id":10,"windows":[{"id":7,"user_vars":{` + vars + `}}]}]}]`
+}
+
 func TestSetAgentStatus(t *testing.T) {
 	k, mShell := newAgentKitty(t, "7")
+	mShell.EXPECT().CmdCapture("kitten", "@", "ls", "--match", "id:7").Return(windowLs(``), nil)
 	mShell.EXPECT().CmdCapture("kitten", "@", "set-user-vars", "--match", "id:7",
 		"ksesh_agent=claude", "ksesh_msg=Needs permission", mock.MatchedBy(func(s string) bool {
 			return strings.HasPrefix(s, "ksesh_status_at=")
@@ -97,6 +103,7 @@ func TestSetAgentStatusStartsATurn(t *testing.T) {
 	k, mShell := newAgentKitty(t, "7")
 	at := mock.MatchedBy(func(s string) bool { return strings.HasPrefix(s, "ksesh_turn_at=") })
 	statusAt := mock.MatchedBy(func(s string) bool { return strings.HasPrefix(s, "ksesh_status_at=") })
+	mShell.EXPECT().CmdCapture("kitten", "@", "ls", "--match", "id:7").Return(windowLs(``), nil)
 	mShell.EXPECT().CmdCapture("kitten", "@", "set-user-vars", "--match", "id:7",
 		"ksesh_agent=claude", "ksesh_msg", "ksesh_prompt=fix it", at, statusAt, "ksesh_status=working").Return("", nil)
 
@@ -108,7 +115,8 @@ func TestSetAgentStatusStartsATurn(t *testing.T) {
 func TestSetAgentStatusClears(t *testing.T) {
 	k, mShell := newAgentKitty(t, "7")
 	mShell.EXPECT().CmdCapture("kitten", "@", "set-user-vars", "--match", "id:3",
-		"ksesh_agent", "ksesh_status", "ksesh_status_at", "ksesh_msg", "ksesh_prompt", "ksesh_turn_at").Return("", nil)
+		"ksesh_agent", "ksesh_status", "ksesh_status_at", "ksesh_msg", "ksesh_prompt", "ksesh_turn_at",
+		"ksesh_pin", "ksesh_snooze_until", "ksesh_snoozed_at", "ksesh_settled_at", "ksesh_unsettled", "ksesh_woke").Return("", nil)
 
 	require.NoError(t, k.SetAgentStatus(3, agent.Update{Clear: true}))
 }

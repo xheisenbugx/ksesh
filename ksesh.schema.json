@@ -244,6 +244,31 @@
       },
       "additionalProperties": false
     },
+    "sidebar": {
+      "type": "object",
+      "description": "The thread sidebar docked to kitty's tabs (`ksesh sidebar`, kitty 0.50+).",
+      "properties": {
+        "edge": {
+          "type": "string",
+          "enum": ["left", "right"],
+          "default": "left",
+          "description": "The edge of the tab the sidebar docks to."
+        },
+        "width": {
+          "type": "string",
+          "pattern": "^[0-9]+%?$",
+          "default": "38",
+          "description": "The sidebar's width in columns, or a percentage of the tab such as \"20%\"."
+        },
+        "auto_settle_after_days": {
+          "type": "integer",
+          "minimum": 0,
+          "default": 7,
+          "description": "Settle threads that haven't done anything for this many days. 0 never settles one on its own."
+        }
+      },
+      "additionalProperties": false
+    },
     "default_session": {
       "type": "object",
       "description": "Default settings applied to all sessions",

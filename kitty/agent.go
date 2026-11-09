@@ -1,6 +1,7 @@
 package kitty
 
 import (
+	"encoding/json"
 	"fmt"
 	"slices"
 	"strconv"
@@ -19,7 +20,104 @@ const (
 	MsgVar      = "ksesh_msg"
 	PromptVar   = "ksesh_prompt"
 	TurnAtVar   = "ksesh_turn_at"
+
+	// Thread triage (see agent/thread.go). Times are unix seconds.
+	PinVar         = "ksesh_pin"
+	SnoozeUntilVar = "ksesh_snooze_until"
+	SnoozedAtVar   = "ksesh_snoozed_at"
+	SettledAtVar   = "ksesh_settled_at"
+	UnsettledVar   = "ksesh_unsettled"
+	WokeVar        = "ksesh_woke"
 )
+
+var threadVars = []string{PinVar, SnoozeUntilVar, SnoozedAtVar, SettledAtVar, UnsettledVar, WokeVar}
+
+// threadAssignments are the set-user-vars arguments that write a thread's
+// state; a bare name unsets the variable.
+func threadAssignments(t model.Thread) []string {
+	unix := func(at time.Time) string {
+		if at.IsZero() {
+			return ""
+		}
+		return strconv.FormatInt(at.Unix(), 10)
+	}
+	flag := func(on bool) string {
+		if on {
+			return "1"
+		}
+		return ""
+	}
+	pin := ""
+	if t.Pin != 0 {
+		pin = strconv.FormatInt(t.Pin, 10)
+	}
+	values := map[string]string{
+		PinVar:         pin,
+		SnoozeUntilVar: unix(t.SnoozedUntil),
+		SnoozedAtVar:   unix(t.SnoozedAt),
+		SettledAtVar:   unix(t.SettledAt),
+		UnsettledVar:   flag(t.Unsettled),
+		WokeVar:        flag(t.Woke),
+	}
+	var out []string
+	for _, name := range threadVars {
+		if v := values[name]; v != "" {
+			out = append(out, name+"="+v)
+		} else {
+			out = append(out, name)
+		}
+	}
+	return out
+}
+
+// threadOf reads a thread's state from its window's user variables.
+func threadOf(vars map[string]string) model.Thread {
+	unix := func(name string) time.Time {
+		at, err := strconv.ParseInt(vars[name], 10, 64)
+		if err != nil || at <= 0 {
+			return time.Time{}
+		}
+		return time.Unix(at, 0)
+	}
+	pin, _ := strconv.ParseInt(vars[PinVar], 10, 64)
+	return model.Thread{
+		Pin:          pin,
+		SnoozedUntil: unix(SnoozeUntilVar),
+		SnoozedAt:    unix(SnoozedAtVar),
+		SettledAt:    unix(SettledAtVar),
+		Unsettled:    vars[UnsettledVar] != "",
+		Woke:         vars[WokeVar] != "",
+	}
+}
+
+// SetThread writes a thread's triage state onto its window.
+func (k *RealKitty) SetThread(windowID int, t model.Thread) error {
+	args := append([]string{"set-user-vars", "--match", "id:" + strconv.Itoa(windowID)}, threadAssignments(t)...)
+	_, err := k.mutate(args...)
+	return err
+}
+
+// windowVars reads one window's user variables.
+func (k *RealKitty) windowVars(windowID int) (map[string]string, error) {
+	out, err := k.rc("ls", "--match", "id:"+strconv.Itoa(windowID))
+	if err != nil {
+		return nil, err
+	}
+	var osWindows []lsOSWindow
+	if err := json.Unmarshal([]byte(out), &osWindows); err != nil {
+		return nil, fmt.Errorf("couldn't parse kitten @ ls output: %w", err)
+	}
+	for _, osw := range osWindows {
+		for _, tab := range osw.Tabs {
+			for _, w := range tab.Windows {
+				if w.ID == windowID {
+					return w.UserVars, nil
+				}
+			}
+		}
+	}
+	return nil, fmt.Errorf("no kitty window %d", windowID)
+}
 
 // agentPrograms are the agents recognized by the program running in a window,
 // so one started without ksesh's hooks still shows up in `ksesh agent list`.
@@ -43,10 +141,23 @@ func (k *RealKitty) SetAgentStatus(windowID int, u agent.Update) error {
 		}
 	}
 	if u.Clear {
-		for _, name := range []string{AgentVar, StatusVar, StatusAtVar, MsgVar, PromptVar, TurnAtVar} {
+		for _, name := range append([]string{AgentVar, StatusVar, StatusAtVar, MsgVar, PromptVar, TurnAtVar}, threadVars...) {
 			set(name, "")
 		}
 	} else {
+		// What the agent does moves its thread: a new prompt un-settles and
+		// wakes it, needing you wakes it early. Only those events can, so only
+		// they pay for reading the window first.
+		if u.StartTurn || u.Status == agent.Waiting || u.Status == agent.Error {
+			vars, err := k.windowVars(windowID)
+			if err != nil {
+				return err
+			}
+			old := threadOf(vars)
+			if t := agent.OnActivity(old, u, time.Now()); t != old {
+				assignments = append(assignments, threadAssignments(t)...)
+			}
+		}
 		if u.Agent != "" {
 			set(AgentVar, u.Agent)
 		}
@@ -87,7 +198,7 @@ func (k *RealKitty) ListAgents() ([]*model.Agent, error) {
 	for _, osw := range st.osWindows {
 		for _, tab := range osw.Tabs {
 			for _, w := range tab.Windows {
-				if w.ID == self {
+				if w.ID == self || isSidebar(w) {
 					continue
 				}
 				a, ok := agentOf(w)
@@ -108,8 +219,13 @@ func (k *RealKitty) ListAgents() ([]*model.Agent, error) {
 func agentOf(w lsWindow) (*model.Agent, bool) {
 	a := &model.Agent{
 		WindowID:    w.ID,
+		Title:       w.Title,
 		Path:        w.dir(),
 		LastFocused: w.LastFocusedAt,
+		Thread:      threadOf(w.UserVars),
+	}
+	if w.CreatedAt > 0 {
+		a.Created = time.Unix(0, w.CreatedAt)
 	}
 	status := w.UserVars[StatusVar]
 	if status == "" {
@@ -129,6 +245,10 @@ func agentOf(w lsWindow) (*model.Agent, bool) {
 	if at, err := strconv.ParseInt(w.UserVars[StatusAtVar], 10, 64); err == nil {
 		since := time.Unix(at, 0)
 		a.Since = &since
+	}
+	if at, err := strconv.ParseInt(w.UserVars[TurnAtVar], 10, 64); err == nil {
+		turn := time.Unix(at, 0)
+		a.TurnAt = &turn
 	}
 	return a, true
 }
