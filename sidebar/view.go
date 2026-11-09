@@ -395,8 +395,14 @@ func (m Model) renderThread(r row, bg string) []string {
 	return []string{paint(first, bg, m.width), paint(second, bg, m.width), paint("", "", m.width)}
 }
 
+// minSubtitle is the least of a thread's session and what it is on that the
+// branch at the right of its second line leaves.
+const minSubtitle = 10
+
 // subtitle is a thread's second line: its session, and what it needs, did or
-// is on.
+// is on, then at the right the branch it is on, when that fits.
+//
+//	api · Added a Threads section   docs ↑2  #12
 func (m Model) subtitle(a *model.Agent, section agent.Section, badge agent.Badge) string {
 	where := a.Session
 	if where == title(a) {
@@ -429,6 +435,22 @@ func (m Model) subtitle(a *model.Agent, section agent.Section, badge agent.Badge
 	if where != "" && what != "" {
 		where += " · "
 	}
+	// The branch goes at the right, when there is room for it: what the
+	// agent needs comes first, and anything else is cut to make room, down
+	// to a few cells.
+	label := m.branchLabel(a)
+	if label != "" {
+		need := ansi.StringWidth(label) + 2
+		full := ansi.StringWidth(where) + ansi.StringWidth(what)
+		switch {
+		case full+need <= room:
+		case color != 0 || room-need < minSubtitle:
+			label = ""
+		}
+		if label != "" {
+			room -= need
+		}
+	}
 	// Where it runs stays quiet; only what it needs is colored.
 	where = ansi.Truncate(where, room, "…")
 	what = ansi.Truncate(what, max(room-ansi.StringWidth(where), 0), "…")
@@ -442,6 +464,9 @@ func (m Model) subtitle(a *model.Agent, section agent.Section, badge agent.Badge
 		} else {
 			out += m.th.mute(what)
 		}
+	}
+	if label != "" {
+		out += strings.Repeat(" ", max(room-ansi.StringWidth(out), 0)+2) + label
 	}
 	return out
 }

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -16,9 +17,12 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/xheisenbugx/ksesh/agent"
+	"github.com/xheisenbugx/ksesh/cache"
+	"github.com/xheisenbugx/ksesh/github"
 	"github.com/xheisenbugx/ksesh/kitty"
 	"github.com/xheisenbugx/ksesh/model"
 	"github.com/xheisenbugx/ksesh/sidebar"
+	"github.com/xheisenbugx/ksesh/worktree"
 )
 
 // threadOpts reads [sidebar]'s triage settings.
@@ -109,6 +113,7 @@ Needs listen_on in kitty.conf: a TUI can't share its tty with remote control.`,
 				Env:          env,
 				AgentCommand: deps.Worktree.AgentCommand,
 				Run:          runKsesh(ksesh),
+				Repos:        newSidebarRepos(deps),
 			})
 			prog := tea.NewProgram(m)
 			// contrib/ksesh_agents.py sends SIGUSR1 when the sidebar's tab
@@ -141,6 +146,57 @@ Needs listen_on in kitty.conf: a TUI can't share its tty with remote control.`,
 		newSidebarOverlayCommand(base),
 	)
 	return cmd
+}
+
+// sidebarRepos tells the sidebar about threads' branches: git through the
+// worktree code, as `ksesh wt status` counts commits, and gh for pull
+// requests, cached in a file every tab's sidebar shares, so that one asking
+// GitHub spares the others.
+type sidebarRepos struct {
+	wt  worktree.Worktree
+	gh  github.Github
+	prs *cache.Namespace[model.PullRequestState]
+}
+
+// The pull request cache: as long as the sidebar keeps an answer itself.
+const (
+	prCacheName    = "sidebar-prs"
+	prCacheVersion = 1
+	prCacheTTL     = 5 * time.Minute
+)
+
+func newSidebarRepos(deps *Deps) sidebarRepos {
+	return sidebarRepos{
+		wt:  deps.Worktree,
+		gh:  deps.Github,
+		prs: cache.NewNamespace[model.PullRequestState](prCacheName, prCacheVersion, prCacheTTL),
+	}
+}
+
+func (r sidebarRepos) BranchStatus(dir string) (model.BranchStatus, error) {
+	return r.wt.BranchStatus(dir)
+}
+
+func (r sidebarRepos) PullRequest(dir, branch string) (model.PullRequestState, bool, error) {
+	key := dir + "\x00" + branch
+	if pr, found, fresh := r.prs.Lookup(r.prs.Load(), key); fresh {
+		return pr, found, nil
+	}
+	pr, found, err := r.gh.PrState(dir)
+	if err != nil {
+		return pr, false, err
+	}
+	// Read again: another sidebar may have written since.
+	entries := r.prs.Load()
+	if found {
+		entries.Put(key, pr)
+	} else {
+		entries.PutMissing(key)
+	}
+	if err := r.prs.Save(entries); err != nil {
+		slog.Debug("sidebar: couldn't cache a pull request", "error", err)
+	}
+	return pr, found, nil
 }
 
 // runKsesh runs ksesh (the command line kseshCommand gives) with args in dir,

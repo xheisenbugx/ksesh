@@ -119,6 +119,26 @@ func TestAgentCommand(t *testing.T) {
 	assert.Equal(t, DefaultAgentCommand, plain.AgentCommand("/tmp"), "not a repo")
 }
 
+func TestBranchStatus(t *testing.T) {
+	w, m := newBranchWorktree(t, model.Config{})
+	dir := "/code/app__worktrees/feat-login"
+	m.git.EXPECT().WorktreeList(dir).Return(true, porcelain, nil)
+	m.git.EXPECT().CurrentBranch(dir).Return(true, "feat/login", nil)
+	m.git.EXPECT().ShowTopLevel(dir).Return(true, dir, nil)
+	m.git.EXPECT().DefaultBranch("/code/app").Return("origin/main", true)
+	m.git.EXPECT().AheadBehind(dir, "origin/main").Return(2, 1, nil)
+
+	st, err := w.BranchStatus(dir)
+	require.NoError(t, err)
+	assert.Equal(t, model.BranchStatus{Branch: "feat/login", Base: "origin/main", Ahead: 2, Behind: 1, Worktree: dir}, st)
+
+	m.git.EXPECT().CurrentBranch("/code/app/src").Return(true, "main", nil)
+	m.git.EXPECT().ShowTopLevel("/code/app/src").Return(true, "/code/app", nil)
+	st, err = w.BranchStatus("/code/app/src")
+	require.NoError(t, err)
+	assert.Equal(t, model.BranchStatus{Branch: "main"}, st, "the base branch in the main worktree")
+}
+
 func TestNewReusesAnExistingWorktree(t *testing.T) {
 	w, m := newBranchWorktree(t, model.Config{})
 	target := "/code/app__worktrees/feat-login"

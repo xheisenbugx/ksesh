@@ -38,6 +38,8 @@ type Worktree interface {
 	// AgentCommand is the agent to start in dir: its repo's agent_command,
 	// else claude.
 	AgentCommand(dir string) string
+	// BranchStatus is where dir's branch stands against the base branch.
+	BranchStatus(dir string) (model.BranchStatus, error)
 }
 
 type RealWorktree struct {

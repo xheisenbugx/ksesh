@@ -58,6 +58,8 @@ type Options struct {
 	// the sidebar leaves to ksesh's own commands (ksesh wt new, wt rm). Nil
 	// can't.
 	Run func(dir string, args ...string) error
+	// Repos tells about the branch each thread is on. Nil shows none.
+	Repos Repos
 }
 
 // How often the sidebar asks kitty what changed: often while it is on
@@ -122,9 +124,12 @@ type Model struct {
 	ask string
 	// fresh is where a new thread is being started.
 	fresh newThread
-	undo  []undoEntry
-	flash string
-	until time.Time // the flash's
+	// branches is what is known of the branch checked out in each thread's
+	// directory, by directory.
+	branches map[string]*branchInfo
+	undo     []undoEntry
+	flash    string
+	until    time.Time // the flash's
 
 	// stateSeq counts the sidebar's own changes to the shared state. A
 	// refresh started before the latest one read the file before it was
@@ -150,7 +155,7 @@ func New(opts Options) Model {
 	}
 	in := textinput.New()
 	in.Prompt = "› "
-	return Model{opts: opts, input: in, now: opts.Now(), shown: true, th: themeFor(nil, nil), hoverButton: -1}
+	return Model{opts: opts, input: in, now: opts.Now(), shown: true, th: themeFor(nil, nil), hoverButton: -1, branches: map[string]*branchInfo{}}
 }
 
 // Restart reports whether the sidebar quit to restart into a new ksesh.
@@ -280,7 +285,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.loaded = true
 			m.keepCursor()
 		}
-		var cmds []tea.Cmd
+		cmds := m.refreshBranches()
 		if m.spinning() && !m.animating {
 			m.animating = true
 			cmds = append(cmds, tea.Tick(spinEvery, func(time.Time) tea.Msg { return animMsg{} }))
@@ -293,6 +298,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cmds = append(cmds, tea.Tick(every, func(time.Time) tea.Msg { return tickMsg{} }))
 		}
 		return m, tea.Batch(cmds...)
+	case branchMsg:
+		m.learn(msg)
+		return m, nil
 	case doneMsg:
 		if msg.err != nil {
 			m.say(msg.err.Error())

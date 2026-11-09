@@ -268,7 +268,16 @@ of threads that need you are bold, and a waiting or failed agent's message is
 colored. A thread that finished or failed while you weren't looking is
 **unread**, marked with an accent `•` at its left, until you go to its window
 (the watcher turns "done" idle then, and records when it saw you in
-`ksesh_seen_at`). Working agents spin, a closed shelf holding the thread you're in shows
+`ksesh_seen_at`).
+
+At the right of a thread's second line goes the branch it is on, when it is
+one of its own and there is room: its name, how many commits it is ahead `↑`
+and behind `↓` its base (as `ksesh wt status` counts them) and its pull
+request, green when open, gray as a draft, magenta merged and red closed. What
+a waiting or failed agent needs comes first: the branch only shows when both
+fit. The sidebar asks git about it every 30 seconds and GitHub (`gh pr view`)
+every 5 minutes, off its UI, and only while it is on screen; the pull requests
+are cached in `~/.cache/ksesh` for every tab's sidebar to share. Working agents spin, a closed shelf holding the thread you're in shows
 its `●`, and the status bar only offers the keys that do something for the
 selected thread.
 
