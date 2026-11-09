@@ -106,7 +106,7 @@ func recordHook(k kitty.Kitty, store *threads.Store, u agent.Update, now time.Ti
 	if store != nil {
 		if rec, ok := store.Get(u.Conversation); ok {
 			carry := agent.Resume(rec.Thread)
-			u.Carry = &carry
+			u.Carry, u.CarryTitle = &carry, rec.CustomTitle
 		}
 	}
 	seen, err := k.UpdateAgent(0, u)

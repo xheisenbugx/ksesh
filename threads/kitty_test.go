@@ -198,3 +198,25 @@ func TestRetentionOf(t *testing.T) {
 	assert.Equal(t, Retention{Keep: 200, MaxAge: 30 * 24 * time.Hour}, RetentionOf(model.SidebarConfig{}))
 	assert.Equal(t, Retention{Keep: 0, MaxAge: 5 * 24 * time.Hour}, RetentionOf(model.SidebarConfig{KeepClosed: &zero, KeepClosedDays: &days}))
 }
+
+func TestARenamedThreadKeepsItsTitleOnceClosed(t *testing.T) {
+	k, mk, _ := newKitty(t)
+	require.NoError(t, k.store.Update("conv", func(r *model.ThreadRecord) {
+		*r = model.ThreadRecord{Conversation: "conv", Agent: "claude", Status: "done", StatusAt: now.Add(-time.Hour)}
+	}))
+	renamed := liveAgent(1, "conv", "✳ Fix the login", model.Thread{})
+	renamed.CustomTitle = "Login redirect"
+	mk.EXPECT().ListAgents().Return([]*model.Agent{renamed}, nil).Once()
+	_, err := k.ListAgents()
+	require.NoError(t, err)
+	r, _ := k.store.Get("conv")
+	assert.Equal(t, "Login redirect", r.CustomTitle)
+
+	// The window closes.
+	mk.EXPECT().ListAgents().Return(nil, nil).Once()
+	agents, err := k.ListAgents()
+	require.NoError(t, err)
+	require.Len(t, agents, 1)
+	assert.True(t, agents[0].Closed)
+	assert.Equal(t, "Login redirect", agents[0].CustomTitle)
+}

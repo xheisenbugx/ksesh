@@ -193,11 +193,15 @@ func (k *RealKitty) UpdateAgent(windowID int, u agent.Update) (*model.Agent, err
 			switch {
 			case u.Carry != nil:
 				t = *u.Carry
+				if u.CarryTitle != "" && w.UserVars[TitleVar] == "" {
+					set(TitleVar, u.CarryTitle)
+					w.UserVars[TitleVar] = u.CarryTitle
+				}
 			case conv != "":
 				t = model.Thread{}
 			}
 		}
-		seen = &model.Agent{WindowID: w.ID, Title: w.Title, Path: w.dir(), Session: cmp.Or(w.UserVars[NameVar], w.SessionName), Thread: t}
+		seen = &model.Agent{WindowID: w.ID, Title: w.Title, CustomTitle: w.UserVars[TitleVar], Path: w.dir(), Session: cmp.Or(w.UserVars[NameVar], w.SessionName), Thread: t}
 		if !u.Clear {
 			t = agent.OnActivity(t, u, time.Now())
 			seen.Thread = t

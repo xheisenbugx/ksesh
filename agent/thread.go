@@ -343,6 +343,7 @@ func WithClosed(live []*model.Agent, records []model.ThreadRecord) []*model.Agen
 func ClosedThread(r model.ThreadRecord) *model.Agent {
 	a := &model.Agent{
 		Title:        r.Title,
+		CustomTitle:  r.CustomTitle,
 		Session:      r.Session,
 		Path:         r.Cwd,
 		Name:         r.Agent,
@@ -407,6 +408,9 @@ func BadgeOf(a *model.Agent, now time.Time) Badge {
 // on, so it is unread until the watcher saw you at its window after it
 // failed.
 func IsUnread(a *model.Agent) bool {
+	if a.Closed {
+		return false // its window is gone: there is nothing left to visit
+	}
 	switch Status(a.Status) {
 	case Done:
 		return true

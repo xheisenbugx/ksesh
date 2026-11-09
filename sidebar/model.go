@@ -655,7 +655,7 @@ func (m Model) keyNormal(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 func (m Model) run(key string) (tea.Model, tea.Cmd) {
 	if a, ok := m.selectedAgent(); ok && a.Closed {
 		switch key {
-		case "p", "s", "z", "w", "a", "y", "x", "r", "K", "J", "shift+up", "shift+down":
+		case "p", "s", "z", "w", "a", "y", "x", "r", "d", "R", "A", "K", "J", "shift+up", "shift+down":
 			m.say("it's closed: ↵ resumes it")
 			return m, nil
 		}

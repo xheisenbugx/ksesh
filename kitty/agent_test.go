@@ -249,3 +249,21 @@ func TestSetTitle(t *testing.T) {
 	assert.Equal(t, "Auth rework", a.CustomTitle)
 	assert.Equal(t, int64(1700000000), a.SeenAt.Unix(), "when the watcher saw you at it")
 }
+
+func TestUpdateAgentGivesAResumedThreadItsTitleBack(t *testing.T) {
+	k, mShell := newAgentKitty(t, "7")
+	statusAt := mock.MatchedBy(func(s string) bool { return strings.HasPrefix(s, "ksesh_status_at=") })
+	mShell.EXPECT().CmdCapture("kitten", "@", "ls", "--match", "id:7").Return(
+		`[{"id":1,"tabs":[{"id":10,"windows":[{"id":7,"title":"claude","cwd":"/c/api","user_vars":{}}]}]}]`, nil)
+	mShell.EXPECT().CmdCapture("kitten", "@", "set-user-vars", "--match", "id:7",
+		"ksesh_title=Login redirect",
+		"ksesh_pin", "ksesh_snooze_until", "ksesh_snoozed_at", "ksesh_settled_at", "ksesh_unsettled=1", "ksesh_woke",
+		"ksesh_conv=abc", "ksesh_agent=claude", "ksesh_msg", "ksesh_prompt", statusAt, "ksesh_status=idle").Return("", nil)
+
+	carry := model.Thread{Unsettled: true}
+	seen, err := k.UpdateAgent(0, agent.Update{Agent: "claude", Status: agent.Idle, SetMessage: true, SetPrompt: true,
+		Start: true, Conversation: "abc", Carry: &carry, CarryTitle: "Login redirect"})
+
+	require.NoError(t, err)
+	assert.Equal(t, "Login redirect", seen.CustomTitle)
+}

@@ -49,7 +49,7 @@ func see(r *model.ThreadRecord, a *model.Agent) {
 	if t := agent.ThreadTitle(a.Title, cmp.Or(r.Agent, a.Name)); t != "" {
 		r.Title = t
 	}
-	r.Session, r.WindowID, r.Thread = a.Session, a.WindowID, a.Thread
+	r.Session, r.WindowID, r.Thread, r.CustomTitle = a.Session, a.WindowID, a.Thread, a.CustomTitle
 }
 
 // Kitty is kitty with the thread history: what the sidebar drives. Its

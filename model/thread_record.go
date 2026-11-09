@@ -16,6 +16,9 @@ type ThreadRecord struct {
 	Transcript string `json:"transcript,omitempty"`
 	// Title is the last title the agent gave its window worth keeping.
 	Title string `json:"title,omitempty"`
+	// CustomTitle is a title you gave the thread (the sidebar's R), which
+	// it keeps when it is resumed.
+	CustomTitle string `json:"custom_title,omitempty"`
 	// Session is the ksesh session its window was in, empty for none.
 	Session string `json:"session,omitempty"`
 	// WindowID is the kitty window it was last seen in.

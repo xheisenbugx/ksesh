@@ -39,6 +39,9 @@ type Update struct {
 	// conversation, given to the window when the conversation first shows
 	// up in it: the thread was resumed there.
 	Carry *model.Thread
+	// CarryTitle is the title you gave the thread, which a window it is
+	// resumed in takes on unless it has one of its own.
+	CarryTitle string
 }
 
 // claudeHookInput is the subset of a Claude Code hook's stdin ksesh reads.

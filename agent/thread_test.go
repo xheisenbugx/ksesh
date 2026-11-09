@@ -260,4 +260,8 @@ func TestIsUnread(t *testing.T) {
 	assert.False(t, IsUnread(failed), "and you've been to it since")
 	failed.SeenAt = now.Add(-time.Hour)
 	assert.True(t, IsUnread(failed), "seen before it failed")
+
+	closed := thread(1, Done, time.Minute, model.Thread{})
+	closed.Closed = true
+	assert.False(t, IsUnread(closed), "a closed thread has no window left to visit")
 }
