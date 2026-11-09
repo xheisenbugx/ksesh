@@ -263,6 +263,29 @@ func TestResizeKeepsAWidthToWorkIn(t *testing.T) {
 	assert.Equal(t, "as narrow as it goes", m.flash)
 }
 
+func TestHelpScrolls(t *testing.T) {
+	m, _ := newModel(t)
+	m, _ = press(t, m, "?")
+	require.Equal(t, modeHelp, m.mode)
+	view := ansi.Strip(m.View().Content)
+	assert.Contains(t, view, "new thread, worktree")
+	assert.NotContains(t, view, "hide everywhere", "more than a short sidebar holds")
+	for i, line := range strings.Split(view, "\n") {
+		assert.LessOrEqual(t, ansi.StringWidth(line), 34, "line %d is too wide: %q", i, line)
+	}
+
+	for range 40 {
+		m, _ = press(t, m, "j")
+	}
+	view = ansi.Strip(m.View().Content)
+	assert.Contains(t, view, "hide everywhere", "j scrolls to the end")
+	assert.Contains(t, view, "other keys: back", "and no further")
+
+	m, _ = press(t, m, "x")
+	assert.Equal(t, modeNormal, m.mode)
+	assert.Zero(t, m.helpOffset)
+}
+
 func ids(agents []*model.Agent) []int {
 	var out []int
 	for _, a := range agents {

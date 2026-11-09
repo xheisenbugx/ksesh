@@ -336,7 +336,10 @@ The mouse works too, as in T3 Code. Hover a thread and its time gives way to
 buttons, pin, snooze and settle (wake and settle on a snoozed one, restore on
 a settled one), and the status bar says what the one under the mouse does.
 Right click a thread, or press `m`, for a menu of everything that can be done
-to it; its Snooze opens the times in its place.
+to it; its Snooze opens the times in its place. Below Reply… it also has
+Review changes, Rename…, New thread… and New in a worktree…, and after Close
+window…, for a thread in a worktree of its own, Archive worktree…. The `+` at
+the right end of the masthead starts a new thread too.
 
 ```
   INBOX ───────────────────────── 2

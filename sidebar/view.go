@@ -132,8 +132,8 @@ func (m Model) View() tea.View {
 		help := m.helpLines()
 		for i := range m.listHeight() {
 			line := ""
-			if i < len(help) {
-				line = paint(help[i], "", m.width)
+			if j := i + m.helpOffset; j < len(help) {
+				line = paint(help[j], "", m.width)
 			}
 			out = append(out, line)
 		}
@@ -684,7 +684,7 @@ func (m Model) helpLines() []string {
 		entry("j k g G", "move"),
 		entry("tab", "next section"),
 		entry("1-9", "go to the nth thread"),
-		entry("n N", "new thread, in a worktree"),
+		entry("n N", "new thread, worktree"),
 		"",
 		section("Triage"),
 		entry("p", "pin, unpin"),
@@ -701,15 +701,20 @@ func (m Model) helpLines() []string {
 		entry("d", "review its changes"),
 		entry("R", "rename the thread"),
 		entry("X", "close its window"),
-		entry("A", "archive: remove its worktree"),
+		entry("A", "archive its worktree"),
 		"",
 		section("Sidebar"),
 		entry("/", "filter; esc clears it"),
-		entry("o", "group the inbox by session"),
+		entry("o", "group by session"),
 		entry("f", "this session, all"),
 		entry("< >", "narrower, wider"),
 		entry("q", "hide everywhere"),
 		"",
-		"  " + m.th.mute("any key to go back"),
+		"  " + m.th.mute("j k scroll, other keys: back"),
 	}
+}
+
+// scrollHelp moves the help screen by delta lines, as far as it goes.
+func (m *Model) scrollHelp(delta int) {
+	m.helpOffset = max(min(m.helpOffset+delta, len(m.helpLines())-m.listHeight()), 0)
 }

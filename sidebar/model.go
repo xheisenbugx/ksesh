@@ -168,6 +168,8 @@ type Model struct {
 	restart     bool
 	// resizing is set while the sidebar docks itself again at a new width.
 	resizing bool
+	// helpOffset is the first line of the help screen shown.
+	helpOffset int
 }
 
 func New(opts Options) Model {
@@ -350,6 +352,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.MouseClickMsg:
 		return m.click(msg)
 	case tea.MouseWheelMsg:
+		if m.mode == modeHelp {
+			if msg.Button == tea.MouseWheelUp {
+				m.scrollHelp(-1)
+			} else if msg.Button == tea.MouseWheelDown {
+				m.scrollHelp(1)
+			}
+			return m, nil
+		}
 		if msg.Button == tea.MouseWheelUp {
 			m.move(-1)
 		} else if msg.Button == tea.MouseWheelDown {
@@ -367,7 +377,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case modeConfirmArchive:
 			return m.keyConfirmArchive(msg)
 		case modeHelp:
-			m.mode = modeNormal
+			switch msg.String() {
+			case "j", "down", "ctrl+n":
+				m.scrollHelp(1)
+			case "k", "up", "ctrl+p":
+				m.scrollHelp(-1)
+			default:
+				m.mode, m.helpOffset = modeNormal, 0
+			}
 			return m, nil
 		case modeMenu:
 			return m.keyMenu(msg)
