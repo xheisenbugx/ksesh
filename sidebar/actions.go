@@ -114,6 +114,45 @@ func (m Model) launchWorktree(prompt string) tea.Cmd {
 	}
 }
 
+// archivable is the linked worktree a thread works in, which archiving it
+// removes: known once the sidebar asked git, and only with Run to run
+// `ksesh wt rm`.
+func (m Model) archivable(a *model.Agent) (string, bool) {
+	info, ok := m.branchOf(a)
+	if !ok || info.status.Worktree == "" || m.opts.Run == nil {
+		return "", false
+	}
+	return info.status.Worktree, true
+}
+
+func (m Model) keyConfirmArchive(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	m.mode = modeNormal
+	a, ok := m.selectedAgent()
+	if msg.String() != "y" || !ok {
+		return m, nil
+	}
+	wt, ok := m.archivable(a)
+	if !ok {
+		return m, nil
+	}
+	return m, m.archive(a, wt)
+}
+
+// archive is done with a thread for good: `ksesh wt rm` removes its
+// worktree, branch and session, then its window closes. wt rm refuses a
+// worktree with uncommitted changes, and the window then stays, with what
+// wt rm said in the status bar.
+func (m Model) archive(a *model.Agent, worktree string) tea.Cmd {
+	run, id, dir, name := m.opts.Run, a.WindowID, a.Path, title(a)
+	return m.do("archived "+name+", removed "+filepath.Base(worktree), nil, func(b Backend) error {
+		if err := run(dir, "wt", "rm", worktree); err != nil {
+			return err
+		}
+		// Closing its session may have closed it already.
+		return b.CloseWindow(id)
+	})
+}
+
 // defaultAgent is what a new thread starts without AgentCommand.
 const defaultAgent = "claude"
 

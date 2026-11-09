@@ -7,6 +7,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 
+	"github.com/xheisenbugx/ksesh/agent"
 	ansicolor "github.com/xheisenbugx/ksesh/ansi"
 	"github.com/xheisenbugx/ksesh/model"
 )
@@ -116,6 +117,39 @@ func (m *Model) learn(msg branchMsg) {
 		}
 		info.prAt = msg.at
 	}
+}
+
+// settleAgain is how long the sidebar leaves a thread it settled for its
+// merged pull request before it would do it again: the time it takes kitty
+// to show the change.
+const settleAgain = 30 * time.Second
+
+// settleMerged settles the threads whose branch's pull request was merged,
+// on agent.SettleMerged's terms, writing it to their windows.
+func (m *Model) settleMerged() []tea.Cmd {
+	var cmds []tea.Cmd
+	now := m.opts.Now()
+	for _, a := range m.agents {
+		info, ok := m.branchOf(a)
+		if !ok || !info.hasPR || info.pr.State != model.PRMerged {
+			continue
+		}
+		if at, ok := m.autoSettled[a.WindowID]; ok && now.Sub(at) < settleAgain {
+			continue
+		}
+		t, ok := agent.SettleMerged(a, now, m.opts.ThreadOpts)
+		if !ok {
+			continue
+		}
+		m.autoSettled[a.WindowID] = now
+		a.Thread = t
+		id := a.WindowID
+		cmds = append(cmds, m.do("settled "+title(a)+": its pull request was merged", nil, func(b Backend) error { return b.SetThread(id, t) }))
+	}
+	if len(cmds) > 0 {
+		m.keepCursor()
+	}
+	return cmds
 }
 
 // branchOf is what is known of the branch a thread is on.

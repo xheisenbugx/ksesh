@@ -85,6 +85,8 @@ const (
 	modeNewBranch
 	modeNewWorktree
 	modeConfirmClose
+	// modeConfirmArchive asks before removing a thread's worktree.
+	modeConfirmArchive
 	modeHelp
 	// modeMenu is a popup open over the list: a thread's context menu, or
 	// the snooze times.
@@ -127,9 +129,16 @@ type Model struct {
 	// branches is what is known of the branch checked out in each thread's
 	// directory, by directory.
 	branches map[string]*branchInfo
-	undo     []undoEntry
-	flash    string
-	until    time.Time // the flash's
+	// autoSettled is when the sidebar settled a thread for its merged pull
+	// request, by window.
+	autoSettled map[int]time.Time
+
+	undo  []undoEntry
+	flash string
+	until time.Time // the flash's
+	// failed marks the flash as what went wrong with an action, rather than
+	// what it did.
+	failed bool
 
 	// stateSeq counts the sidebar's own changes to the shared state. A
 	// refresh started before the latest one read the file before it was
@@ -155,7 +164,8 @@ func New(opts Options) Model {
 	}
 	in := textinput.New()
 	in.Prompt = "› "
-	return Model{opts: opts, input: in, now: opts.Now(), shown: true, th: themeFor(nil, nil), hoverButton: -1, branches: map[string]*branchInfo{}}
+	return Model{opts: opts, input: in, now: opts.Now(), shown: true, th: themeFor(nil, nil), hoverButton: -1,
+		branches: map[string]*branchInfo{}, autoSettled: map[int]time.Time{}}
 }
 
 // Restart reports whether the sidebar quit to restart into a new ksesh.
@@ -286,6 +296,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.keepCursor()
 		}
 		cmds := m.refreshBranches()
+		if msg.err == nil {
+			cmds = append(cmds, m.settleMerged()...)
+		}
 		if m.spinning() && !m.animating {
 			m.animating = true
 			cmds = append(cmds, tea.Tick(spinEvery, func(time.Time) tea.Msg { return animMsg{} }))
@@ -300,10 +313,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(cmds...)
 	case branchMsg:
 		m.learn(msg)
+		if cmds := m.settleMerged(); len(cmds) > 0 {
+			return m, tea.Batch(cmds...)
+		}
 		return m, nil
 	case doneMsg:
 		if msg.err != nil {
 			m.say(msg.err.Error())
+			m.failed, m.until = true, m.opts.Now().Add(2*flashFor)
 		} else if msg.flash != "" {
 			m.say(msg.flash)
 		}
@@ -334,6 +351,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.keyInput(msg)
 		case modeConfirmClose:
 			return m.keyConfirmClose(msg)
+		case modeConfirmArchive:
+			return m.keyConfirmArchive(msg)
 		case modeHelp:
 			m.mode = modeNormal
 			return m, nil
@@ -346,7 +365,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m *Model) say(text string) {
-	m.flash, m.until = text, m.opts.Now().Add(flashFor)
+	m.flash, m.until, m.failed = text, m.opts.Now().Add(flashFor), false
 }
 
 // board is the threads in view, by section.
@@ -613,6 +632,14 @@ func (m Model) run(key string) (tea.Model, tea.Cmd) {
 	case "X":
 		if _, ok := m.selectedAgent(); ok {
 			m.mode = modeConfirmClose
+		}
+	case "A":
+		if a, ok := m.selectedAgent(); ok {
+			if _, ok := m.archivable(a); !ok {
+				m.say("not in a worktree of its own")
+				return m, nil
+			}
+			m.mode = modeConfirmArchive
 		}
 	case "f":
 		m.stateSeq++

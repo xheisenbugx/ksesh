@@ -608,8 +608,22 @@ func (m Model) footer() []string {
 		return append(lines, m.hintLine([]hint{{"↵", "pick"}, {"j k", "move"}, {"esc", "close"}}))
 	case modeConfirmClose:
 		return append(lines, line(" "+fg(ansicolor.Red, "Close the agent's window?")+" "+m.key("y")+m.th.mute("/n")))
+	case modeConfirmArchive:
+		return append(lines, line(" "+fg(ansicolor.Red, "Remove its worktree, branch")), line(" "+fg(ansicolor.Red, "and window?")+" "+m.key("y")+m.th.mute("/n")))
 	}
 	if m.flash != "" && m.opts.Now().Before(m.until) {
+		if m.failed {
+			// What went wrong is worth reading whole: on up to three lines.
+			wrapped := strings.Split(ansi.Wrap(m.flash, max(m.width-4, 1), ""), "\n")
+			for i, l := range wrapped[:min(len(wrapped), 3)] {
+				mark := "  "
+				if i == 0 {
+					mark = fg(ansicolor.Red, "✗") + " "
+				}
+				lines = append(lines, line(" "+mark+l))
+			}
+			return lines
+		}
 		return append(lines, line(" "+fg(ansicolor.Green, "✓")+" "+m.flash))
 	}
 	if b, ok := m.hoveredButton(); ok {
@@ -653,6 +667,7 @@ func (m Model) helpLines() []string {
 		entry("d", "review its changes"),
 		entry("R", "rename the thread"),
 		entry("X", "close its window"),
+		entry("A", "archive: remove its worktree"),
 		"",
 		section("Sidebar"),
 		entry("f", "this session, all"),

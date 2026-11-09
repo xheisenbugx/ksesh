@@ -130,7 +130,13 @@ func (m Model) threadMenu(a *model.Agent) []action {
 	items = append(items, separator)
 	closeIt := byKey(iconClose, "Close window…", "X")
 	closeIt.danger = true
-	return append(items, closeIt)
+	items = append(items, closeIt)
+	if _, ok := m.archivable(a); ok {
+		archive := byKey(iconSettle, "Archive worktree…", "A")
+		archive.danger = true
+		items = append(items, archive)
+	}
+	return items
 }
 
 // snoozeAction opens the snooze times in place of the menu it is in.

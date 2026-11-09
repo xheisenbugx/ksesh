@@ -21,6 +21,9 @@ package agent
 //   - A thread nobody touched for Opts.AutoSettleAfter settles itself, unless
 //     it is pinned, snoozed, working, waiting or failed, or you un-settled it
 //     by hand since it last did something.
+//   - So does a thread whose branch's pull request was merged, on the same
+//     terms (SettleMerged): the sidebar, which knows about pull requests,
+//     settles it.
 //
 // and by hand: Pin, Settle, Snooze and Wake. Pinning un-settles and wakes a
 // thread; settling unpins and wakes it.
@@ -222,6 +225,24 @@ func ToggleSettle(a *model.Agent, now time.Time, opts ThreadOpts) (model.Thread,
 	t.Unsettled = false
 	t.SnoozedUntil, t.SnoozedAt, t.Woke = time.Time{}, time.Time{}, false
 	return t, nil
+}
+
+// SettleMerged settles a thread whose branch's pull request was merged: its
+// work is done. As with settling for inactivity, a thread that is pinned,
+// snoozed or back from a snooze, an agent still working, waiting on you or
+// failed, and a thread you took out of Settled by hand since it last did
+// something are left alone. ok is false when there is nothing to change.
+func SettleMerged(a *model.Agent, now time.Time, opts ThreadOpts) (t model.Thread, ok bool) {
+	t = a.Thread
+	if t.Unsettled || t.Pin != 0 || IsSnoozed(t, now) || HasWoken(t, now) || isSettled(a, now, opts) {
+		return t, false
+	}
+	switch Status(a.Status) {
+	case Working, Waiting, Error:
+		return t, false
+	}
+	t.SettledAt = now
+	return t, true
 }
 
 // Snooze hides a thread until a time. A settled thread comes out of Settled,

@@ -295,6 +295,9 @@ their own, the way they do in T3 Code:
 - **A thread idle for 7 days settles itself** (`auto_settle_after_days`),
   unless it is pinned, snoozed, working, waiting or failed, or you took it out
   of Settled by hand since it last did something.
+- **A thread whose pull request was merged settles itself** once the agent is
+  idle or done, on the same terms. The sidebar does it, since it is what asks
+  GitHub.
 - **Pinning** un-settles and wakes a thread. **Settling** unpins and wakes
   it, and is refused while the agent is working or waiting on you.
 
@@ -321,6 +324,7 @@ In the sidebar:
 | `d`          | review it: `ksesh agent diff --pager` over the window beside the sidebar |
 | `R`          | rename the thread; empty goes back to the agent's title |
 | `X`          | close the agent's window (asks first)                 |
+| `A`          | archive a thread in a worktree of its own: `ksesh wt rm` removes the worktree, its branch and session, then the window closes (asks first; wt rm's refusal of uncommitted changes shows in the status bar) |
 | `f`          | only this tab's session, or every session             |
 | `q`          | hide the sidebar in every tab                         |
 

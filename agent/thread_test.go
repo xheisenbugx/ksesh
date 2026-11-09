@@ -228,6 +228,27 @@ func TestParseSnooze(t *testing.T) {
 	}
 }
 
+func TestSettleMerged(t *testing.T) {
+	done := thread(1, Done, time.Minute, model.Thread{})
+	th, ok := SettleMerged(done, now, opts)
+	require.True(t, ok)
+	assert.Equal(t, now, th.SettledAt)
+
+	for name, a := range map[string]*model.Agent{
+		"working":           thread(1, Working, time.Minute, model.Thread{}),
+		"waiting":           thread(1, Waiting, time.Minute, model.Thread{}),
+		"failed":            thread(1, Error, time.Minute, model.Thread{}),
+		"pinned":            thread(1, Idle, time.Minute, model.Thread{Pin: 1}),
+		"snoozed":           thread(1, Idle, time.Minute, model.Thread{SnoozedUntil: now.Add(time.Hour)}),
+		"woke":              thread(1, Idle, time.Minute, model.Thread{Woke: true}),
+		"settled already":   thread(1, Idle, time.Minute, model.Thread{SettledAt: now.Add(-time.Hour)}),
+		"un-settled by you": thread(1, Idle, time.Minute, model.Thread{Unsettled: true}),
+	} {
+		_, ok := SettleMerged(a, now, opts)
+		assert.False(t, ok, name)
+	}
+}
+
 func TestIsUnread(t *testing.T) {
 	assert.True(t, IsUnread(thread(1, Done, time.Minute, model.Thread{})), "done until you go to it")
 	assert.False(t, IsUnread(thread(1, Idle, time.Minute, model.Thread{})))
