@@ -251,9 +251,12 @@ with uncommitted changes or delete an unmerged branch unless --force.`,
 			sessions, _ := deps.Kitty.ListSessions()
 			current, _ := deps.Kitty.GetCurrentSession()
 			var kill []string
+			// A worktree git refused to remove fails the command, after the
+			// others are done: the sidebar's archive tells you why from it.
+			var errs []string
 			for _, wt := range candidates {
 				if err := deps.Worktree.Remove(wt, force, keepBranch); err != nil {
-					fmt.Fprintln(cmd.ErrOrStderr(), err)
+					errs = append(errs, err.Error())
 					continue
 				}
 				fmt.Fprintln(out, "removed", wt.Path)
@@ -262,7 +265,6 @@ with uncommitted changes or delete an unmerged branch unless --force.`,
 				}
 			}
 			// The session ksesh runs in goes last: closing it ends ksesh.
-			var errs []string
 			for _, name := range append(without(kill, current), within(kill, current)...) {
 				if err := killSession(deps, name); err != nil {
 					errs = append(errs, err.Error())

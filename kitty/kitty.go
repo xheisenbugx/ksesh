@@ -102,6 +102,8 @@ type Kitty interface {
 	// SetThread writes a thread's triage state (pinned, snoozed, settled)
 	// onto its agent's window.
 	SetThread(windowID int, t model.Thread) error
+	// SetTitle gives a thread a title of your own; empty clears it.
+	SetTitle(windowID int, title string) error
 	// SidebarTab is the sidebar of the tab holding windowID, 0 for none.
 	SidebarTab(windowID int) (int, error)
 	// OpenSidebar docks a thread sidebar to the tab holding windowID.

@@ -26,6 +26,11 @@ type State struct {
 	Expanded map[agent.Section]bool `json:"expanded,omitempty"`
 	// Session shows only the threads of the tab's own session.
 	Session bool `json:"session,omitempty"`
+	// Group groups the inbox by session, like T3 Code's projects.
+	Group bool `json:"group,omitempty"`
+	// Width is the columns a new sidebar opens at, once set with < and >;
+	// it wins over [sidebar] width.
+	Width string `json:"width,omitempty"`
 }
 
 // StatePath is $XDG_STATE_HOME/ksesh/sidebar.json, ~/.local/state by default.

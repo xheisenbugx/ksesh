@@ -44,16 +44,16 @@ type Update struct {
 // claudeHookInput is the subset of a Claude Code hook's stdin ksesh reads.
 // See https://code.claude.com/docs/en/hooks.
 type claudeHookInput struct {
-	HookEventName        string `json:"hook_event_name"`
-	SessionID            string `json:"session_id"`
-	TranscriptPath       string `json:"transcript_path"`
-	Cwd                  string `json:"cwd"`
-	AgentID              string `json:"agent_id"`
-	Prompt               string `json:"prompt"`
-	Message              string `json:"message"`
-	NotificationType     string `json:"notification_type"`
-	ToolName             string `json:"tool_name"`
-	ToolInput            struct {
+	HookEventName    string `json:"hook_event_name"`
+	SessionID        string `json:"session_id"`
+	TranscriptPath   string `json:"transcript_path"`
+	Cwd              string `json:"cwd"`
+	AgentID          string `json:"agent_id"`
+	Prompt           string `json:"prompt"`
+	Message          string `json:"message"`
+	NotificationType string `json:"notification_type"`
+	ToolName         string `json:"tool_name"`
+	ToolInput        struct {
 		Command  string `json:"command"`
 		FilePath string `json:"file_path"`
 		URL      string `json:"url"`

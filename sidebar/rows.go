@@ -1,6 +1,8 @@
 package sidebar
 
 import (
+	"slices"
+
 	"github.com/xheisenbugx/ksesh/agent"
 	"github.com/xheisenbugx/ksesh/model"
 )
@@ -21,6 +23,9 @@ const (
 	rowFill
 	// rowRule is the line over the shelves.
 	rowRule
+	// rowGroup names the session of the inbox threads under it, when the
+	// inbox is grouped by session.
+	rowGroup
 )
 
 type row struct {
@@ -32,6 +37,8 @@ type row struct {
 	// holdsCurrent marks a closed shelf's header when the thread you're on
 	// is folded away in it.
 	holdsCurrent bool
+	// session is a rowGroup's.
+	session string
 }
 
 func (r row) selectable() bool {
@@ -121,4 +128,60 @@ func layout(board agent.Board, expanded map[agent.Section]bool, allSettled bool,
 		rows = append(rows, tray...)
 	}
 	return rows
+}
+
+// groupInbox groups the inbox's threads by session, under a row naming each,
+// the way T3 Code groups threads by project. The session with the latest
+// activity comes first, and each keeps its threads in inbox order.
+//
+//	INBOX ─────────────────── 3
+//	 api ──────────────────── 2
+//	  …its threads
+//	 docs ─────────────────── 1
+func groupInbox(rows []row) []row {
+	start := slices.IndexFunc(rows, func(r row) bool { return r.kind == rowThread && r.section == agent.Active })
+	if start < 0 {
+		return rows
+	}
+	end := start
+	for end < len(rows) && rows[end].kind == rowThread && rows[end].section == agent.Active {
+		end++
+	}
+	grouped := slices.Clone(rows[:start])
+	for _, group := range bySession(rows[start:end], func(r row) string { return r.agent.Session }) {
+		grouped = append(grouped, row{kind: rowGroup, section: agent.Active, session: group[0].agent.Session, count: len(group)})
+		grouped = append(grouped, group...)
+	}
+	return append(grouped, rows[end:]...)
+}
+
+// bySession splits items into groups of one session each, in the order
+// their sessions first come up, keeping each group's items in order.
+func bySession[T any](items []T, session func(T) string) [][]T {
+	var order []string
+	groups := map[string][]T{}
+	for _, it := range items {
+		s := session(it)
+		if _, ok := groups[s]; !ok {
+			order = append(order, s)
+		}
+		groups[s] = append(groups[s], it)
+	}
+	out := make([][]T, 0, len(order))
+	for _, s := range order {
+		out = append(out, groups[s])
+	}
+	return out
+}
+
+// Order is the threads in the order the sidebar lists them, its inbox
+// grouped by session when group is set, leaving out the snoozed and settled
+// ones it keeps out of the way: what `ksesh sidebar next`, `prev` and `goto`
+// step through, and the sidebar's 1–9 pick from.
+func Order(board agent.Board, group bool) []*model.Agent {
+	inbox := board[agent.Active]
+	if group {
+		inbox = slices.Concat(bySession(inbox, func(a *model.Agent) string { return a.Session })...)
+	}
+	return slices.Concat(board[agent.Pinned], inbox, board[agent.SectionWorking])
 }

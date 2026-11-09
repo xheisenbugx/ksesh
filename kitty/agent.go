@@ -24,6 +24,12 @@ const (
 	// ConvVar is the agent's conversation id (Claude Code's session_id),
 	// which ties the window to its record in the thread history.
 	ConvVar = "ksesh_conv"
+	// TitleVar is a title you gave the thread, shown instead of the window's.
+	TitleVar = "ksesh_title"
+	// SeenAtVar is when you last focused the window, set by kitty's watcher
+	// (contrib/ksesh_agents.py): what tells a failure you saw from one you
+	// didn't.
+	SeenAtVar = "ksesh_seen_at"
 
 	// Thread triage (see agent/thread.go). Times are unix seconds.
 	PinVar         = "ksesh_pin"
@@ -98,6 +104,17 @@ func threadOf(vars map[string]string) model.Thread {
 func (k *RealKitty) SetThread(windowID int, t model.Thread) error {
 	args := append([]string{"set-user-vars", "--match", "id:" + strconv.Itoa(windowID)}, threadAssignments(t)...)
 	_, err := k.mutate(args...)
+	return err
+}
+
+// SetTitle gives a thread a title of your own, or with an empty one goes
+// back to the window's.
+func (k *RealKitty) SetTitle(windowID int, title string) error {
+	assignment := TitleVar // a bare name unsets it
+	if title != "" {
+		assignment += "=" + title
+	}
+	_, err := k.mutate("set-user-vars", "--match", "id:"+strconv.Itoa(windowID), assignment)
 	return err
 }
 
@@ -262,6 +279,7 @@ func agentOf(w lsWindow) (*model.Agent, bool) {
 		Path:        w.dir(),
 		LastFocused: w.LastFocusedAt,
 		Thread:      threadOf(w.UserVars),
+		CustomTitle: w.UserVars[TitleVar],
 	}
 	if w.CreatedAt > 0 {
 		a.Created = time.Unix(0, w.CreatedAt)
@@ -289,6 +307,9 @@ func agentOf(w lsWindow) (*model.Agent, bool) {
 	if at, err := strconv.ParseInt(w.UserVars[TurnAtVar], 10, 64); err == nil {
 		turn := time.Unix(at, 0)
 		a.TurnAt = &turn
+	}
+	if at, err := strconv.ParseInt(w.UserVars[SeenAtVar], 10, 64); err == nil {
+		a.SeenAt = time.Unix(at, 0)
 	}
 	return a, true
 }

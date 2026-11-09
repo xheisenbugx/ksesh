@@ -26,6 +26,7 @@ MSG_VAR = 'ksesh_msg'
 PROMPT_VAR = 'ksesh_prompt'
 TURN_AT_VAR = 'ksesh_turn_at'
 NAME_VAR = 'ksesh_name'
+SEEN_AT_VAR = 'ksesh_seen_at'
 # Thread triage, set by ksesh (see agent/thread.go in ksesh).
 SNOOZE_UNTIL_VAR = 'ksesh_snooze_until'
 SNOOZED_AT_VAR = 'ksesh_snoozed_at'
@@ -232,6 +233,12 @@ def _quick_turn(window: Any) -> bool:
         return False
 
 
+def _mark_seen(window: Any) -> None:
+    """Record that you looked at an agent's window: the sidebar shows a failure
+    from before that as read (see IsUnread in ksesh's agent/thread.go)."""
+    window.set_user_var(SEEN_AT_VAR, str(int(time.time())))
+
+
 def on_set_user_var(boss: Any, window: Any, data: dict[str, Any]) -> None:
     if data.get('key') != STATUS_VAR:
         return
@@ -241,6 +248,9 @@ def on_set_user_var(boss: Any, window: Any, data: dict[str, Any]) -> None:
         # It finished in front of you: already seen.
         window.set_user_var(STATUS_VAR, 'idle')
         return
+    if status == 'error' and _is_watched(boss, window):
+        # It failed in front of you: not unread in the sidebar.
+        _mark_seen(window)
     if status in NOTIFY and not (status == 'done' and _quick_turn(window)):
         _notify(boss, window, status)
     else:
@@ -255,6 +265,8 @@ def on_focus_change(boss: Any, window: Any, data: dict[str, Any]) -> None:
     if _status(window) == 'done':
         window.set_user_var(STATUS_VAR, 'idle')
         _close_notification(window)
+    if _status(window):
+        _mark_seen(window)
     # Nor does the "woke" mark of a thread back from a snooze, once seen.
     uv = window.user_vars
     if uv.get(WOKE_VAR) or (uv.get(SNOOZE_UNTIL_VAR) and not _snoozed(window)):

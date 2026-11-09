@@ -187,7 +187,7 @@ reviewed: everything since it left its base (origin's default branch), so
 commits, uncommitted changes and new files alike, with the files not committed
 yet marked `●`. The diff is drawn with line numbers and tinted backgrounds, and
 goes through [delta](https://github.com/dandavison/delta) instead when it is
-installed.
+installed. `--pager` pages it in `less`.
 
 [`contrib/ksesh-agents-fzf`](contrib/ksesh-agents-fzf) is a live picker over
 them (it refreshes every 2 seconds), with the agent's screen, or its git diff,
@@ -284,10 +284,24 @@ background and foreground, so it suits light and dark themes alike; the
 selected row is tinted with the accent and marked with a bar, the one under
 the mouse is lifted a little.
 
-Each thread shows the title its agent gave it, how long ago it last did
-something, and under that its session and what it needs, did or is on. Titles
+Each thread shows the title its agent gave it (or the one you gave it with
+`R`, kept in `ksesh_title` and shown by `ksesh agent list` too), how long ago
+it last did something, and under that its session and what it needs, did or
+is on. Titles
 of threads that need you are bold, and a waiting or failed agent's message is
-colored. Working agents spin, a closed shelf holding the thread you're in shows
+colored. A thread that finished or failed while you weren't looking is
+**unread**, marked with an accent `•` at its left, until you go to its window
+(the watcher turns "done" idle then, and records when it saw you in
+`ksesh_seen_at`).
+
+At the right of a thread's second line goes the branch it is on, when it is
+one of its own and there is room: its name, how many commits it is ahead `↑`
+and behind `↓` its base (as `ksesh wt status` counts them) and its pull
+request, green when open, gray as a draft, magenta merged and red closed. What
+a waiting or failed agent needs comes first: the branch only shows when both
+fit. The sidebar asks git about it every 30 seconds and GitHub (`gh pr view`)
+every 5 minutes, off its UI, and only while it is on screen; the pull requests
+are cached in `~/.cache/ksesh` for every tab's sidebar to share. Working agents spin, a closed shelf holding the thread you're in shows
 its `●`, and the status bar only offers the keys that do something for the
 selected thread.
 
@@ -305,6 +319,9 @@ their own, the way they do in T3 Code:
 - **A thread idle for 7 days settles itself** (`auto_settle_after_days`),
   unless it is pinned, snoozed, working, waiting or failed, or you took it out
   of Settled by hand since it last did something.
+- **A thread whose pull request was merged settles itself** once the agent is
+  idle or done, on the same terms. The sidebar does it, since it is what asks
+  GitHub.
 - **Pinning** un-settles and wakes a thread. **Settling** unpins and wakes
   it, and is refused while the agent is working or waiting on you.
 
@@ -332,6 +349,9 @@ In the sidebar:
 | `enter` `l`  | go to the thread (or open/close a shelf, resume a closed thread), also a click |
 | `esc` `h`    | back to the window you were in                        |
 | `j` `k` `g` `G` `tab` | move; `tab` jumps to the next shelf          |
+| `1`–`9`      | go to the nth thread of the sidebar's order (below)   |
+| `n`          | new thread: asks what to do, then starts the agent (`agent_command`, default `claude`) on it in a new tab of the selected thread's session and directory, also the masthead's `+` |
+| `N`          | new thread in a new worktree: asks for a branch, then what to do, and runs `ksesh wt new <branch> -p …` in the selected thread's repo |
 | `p`          | pin or unpin; `K` `J` move a pin up or down            |
 | `s`          | settle or un-settle                                   |
 | `z`          | snooze: in 1 or 3 hours, this evening, tomorrow 9:00, next Monday 9:00, or `c` for any time (`90m`, `2d`, `15:04`, `2026-12-01 09:00`) |
@@ -339,15 +359,24 @@ In the sidebar:
 | `u`          | undo the last pin, settle, snooze or wake             |
 | `m`          | the thread's menu, also a right click                 |
 | `a` `x` `r`  | approve, deny or interrupt, reply, without switching  |
+| `d`          | review it: `ksesh agent diff --pager` over the window beside the sidebar |
+| `R`          | rename the thread; empty goes back to the agent's title |
 | `X`          | close the agent's window, or forget a closed thread (asks first) |
+| `A`          | archive a thread in a worktree of its own: `ksesh wt rm` removes the worktree, its branch and session, then the window closes (asks first; wt rm's refusal of uncommitted changes shows in the status bar) |
+| `/`          | filter by title, session or branch as you type; `enter` keeps it, `esc` clears it |
+| `o`          | group the inbox by session, like T3 Code's projects, and back |
 | `f`          | only this tab's session, or every session             |
+| `<` `>`      | narrow or widen the sidebar by 4 columns; new sidebars open at that width |
 | `q`          | hide the sidebar in every tab                         |
 
 The mouse works too, as in T3 Code. Hover a thread and its time gives way to
 buttons, pin, snooze and settle (wake and settle on a snoozed one, restore on
 a settled one), and the status bar says what the one under the mouse does.
 Right click a thread, or press `m`, for a menu of everything that can be done
-to it; its Snooze opens the times in its place.
+to it; its Snooze opens the times in its place. Below Reply… it also has
+Review changes, Rename…, New thread… and New in a worktree…, and after Close
+window…, for a thread in a worktree of its own, Archive worktree…. The `+` at
+the right end of the masthead starts a new thread too.
 
 ```
   INBOX ───────────────────────── 2
@@ -376,7 +405,12 @@ ksesh sidebar print [--json]          # the threads by section, closed ones by c
 ksesh sidebar next / prev             # go down / up the sidebar's order
 ksesh agent resume <conversation>     # resume a closed thread (an id prefix will do)
 ksesh agent forget <conversation>     # drop it from the thread history
+ksesh sidebar goto 3                  # go to its third thread
 ```
+
+The sidebar's order, which `next`, `prev`, `goto` and the sidebar's `1`–`9`
+follow, is pinned, the inbox (grouped by session after `o`), then working,
+leaving out the snoozed and settled threads; after `f`, only this session's.
 
 `ksesh agent next` skips snoozed and settled threads, and so do the tab bar's
 badges and attention strip: you put those away.
@@ -395,6 +429,9 @@ map super+ctrl+z    launch --type=background --allow-remote-control ksesh agent 
 map super+ctrl+w    launch --type=background --allow-remote-control ksesh agent wake
 map super+ctrl+j    launch --type=background --allow-remote-control ksesh sidebar next
 map super+ctrl+k    launch --type=background --allow-remote-control ksesh sidebar prev
+map super+ctrl+1    launch --type=background --allow-remote-control ksesh sidebar goto 1
+map super+ctrl+2    launch --type=background --allow-remote-control ksesh sidebar goto 2
+# …and so on to 9
 ```
 
 Full-window pickers don't fit in the sidebar. Bind their keys twice, so that
@@ -421,10 +458,17 @@ keep_closed = 200           # closed threads kept to resume; 0 keeps none
 keep_closed_days = 30       # forget closed threads idle this long; 0 never
 ```
 
+Once you resize a sidebar with `<` and `>`, its width is remembered in the
+sidebar's state and wins over `width`. kitty 0.50 can't resize a dock (they
+sit outside the layout `resize-window` works on), so the sidebar docks a new
+one at the new width and closes; sidebars already open in other tabs keep
+theirs until they are opened again.
+
 The sidebar is a window of its own, so it never counts as one of the session's
 windows. A tab's sidebar closes with the tab's last window, and kitty saves it
-with the tab in session files. Whether the sidebar is on and which shelves are
-open is shared by every tab's sidebar, in `~/.local/state/ksesh/sidebar.json`.
+with the tab in session files. Whether the sidebar is on, which shelves are
+open and whether the inbox is grouped are shared by every tab's sidebar, in
+`~/.local/state/ksesh/sidebar.json`; a filter is the one sidebar's.
 
 The sidebars don't ask kitty what changed. The watcher's
 [`ksesh_snapshot.py`](contrib/ksesh_snapshot.py) writes what they need (what

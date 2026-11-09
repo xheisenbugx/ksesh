@@ -72,10 +72,14 @@ func agentRows(agents []*model.Agent, now time.Time, color bool) []string {
 }
 
 // agentWhere is "session › tab title", without the status glyph agents put in
-// front of their titles.
+// front of their titles, or "session › your title" for a thread you named.
 func agentWhere(a *model.Agent) string {
 	where := a.Session
-	if title := agent.CleanTitle(a.TabTitle); title != "" {
+	title := a.CustomTitle
+	if title == "" {
+		title = agent.CleanTitle(a.TabTitle)
+	}
+	if title != "" {
 		if where != "" {
 			where += " › "
 		}

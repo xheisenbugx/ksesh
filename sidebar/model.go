@@ -12,6 +12,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/xheisenbugx/ksesh/agent"
+	"github.com/xheisenbugx/ksesh/kitty"
 	"github.com/xheisenbugx/ksesh/model"
 )
 
@@ -19,6 +20,7 @@ import (
 type Backend interface {
 	ListAgents() ([]*model.Agent, error)
 	SetThread(windowID int, t model.Thread) error
+	SetTitle(windowID int, title string) error
 	FocusWindow(windowID int) error
 	FocusPlain(windowID int) error
 	LastWorkWindow(windowID int) (int, error)
@@ -28,6 +30,10 @@ type Backend interface {
 	SendText(windowID int, text string, enter bool) error
 	CloseWindow(windowID int) error
 	CloseSidebars() error
+	OverlayOn(windowID int, env []string, command []string) error
+	NewWindowInSession(opts model.KittyTabOpts) (string, error)
+	SendKeys(target string, command string) (string, error)
+	OpenSidebar(windowID int, opts kitty.SidebarOpts) (int, error)
 	Refresh()
 	// ResumeThread opens a closed thread again, in a new window running its
 	// agent on the same conversation.
@@ -52,6 +58,23 @@ type Options struct {
 	// sidebar looks at kitty again as soon as it changes rather than on a
 	// timer. Nil, or not live, refreshes on the timer.
 	Watch func() (changed, live bool)
+	// Ksesh runs this ksesh: the binary and the flags it was given (--config),
+	// for what the sidebar opens in other windows, like a review.
+	Ksesh []string
+	// Env is NAME=VALUE pairs for those, such as the sidebar's PATH.
+	Env []string
+	// AgentCommand is the agent a new thread in dir starts: its repo's
+	// agent_command, else claude. Nil always starts claude.
+	AgentCommand func(dir string) string
+	// Run runs ksesh with args in dir and returns what went wrong, for what
+	// the sidebar leaves to ksesh's own commands (ksesh wt new, wt rm). Nil
+	// can't.
+	Run func(dir string, args ...string) error
+	// Repos tells about the branch each thread is on. Nil shows none.
+	Repos Repos
+	// Dock is how the sidebar is docked, for < and > to dock it again at a
+	// new width: kitty can't resize a dock. Without a Command it can't.
+	Dock kitty.SidebarOpts
 }
 
 // How often the sidebar asks kitty what changed: often while it is on
@@ -74,7 +97,17 @@ const (
 	modeSnooze
 	modeSnoozeCustom
 	modeReply
+	modeRename
+	// modeNewThread asks for the prompt of a new thread; modeNewBranch for
+	// the branch of a new worktree, then modeNewWorktree for its prompt.
+	modeNewThread
+	modeNewBranch
+	modeNewWorktree
+	// modeFilter filters the threads as you type.
+	modeFilter
 	modeConfirmClose
+	// modeConfirmArchive asks before removing a thread's worktree.
+	modeConfirmArchive
 	modeHelp
 	// modeMenu is a popup open over the list: a thread's context menu, or
 	// the snooze times.
@@ -109,9 +142,27 @@ type Model struct {
 
 	mode  mode
 	input textinput.Model
+	// ask, when set, is the question the footer's input asks, in place of
+	// its mode's.
+	ask string
+	// fresh is where a new thread is being started.
+	fresh newThread
+	// filter keeps only the threads whose title, session or branch has
+	// every one of its words.
+	filter string
+	// branches is what is known of the branch checked out in each thread's
+	// directory, by directory.
+	branches map[string]*branchInfo
+	// autoSettled is when the sidebar settled a thread for its merged pull
+	// request, by window.
+	autoSettled map[int]time.Time
+
 	undo  []undoEntry
 	flash string
 	until time.Time // the flash's
+	// failed marks the flash as what went wrong with an action, rather than
+	// what it did.
+	failed bool
 
 	// stateSeq counts the sidebar's own changes to the shared state. A
 	// refresh started before the latest one read the file before it was
@@ -124,10 +175,15 @@ type Model struct {
 	// hoverButton is which of the hovered thread's buttons the mouse is on,
 	// -1 for none.
 	hoverButton int
+	hoverNew    bool // the mouse is on the new thread button
 	menu        popup
 	frame       int // of the working spinner
 	animating   bool
 	restart     bool
+	// resizing is set while the sidebar docks itself again at a new width.
+	resizing bool
+	// helpOffset is the first line of the help screen shown.
+	helpOffset int
 }
 
 func New(opts Options) Model {
@@ -136,7 +192,8 @@ func New(opts Options) Model {
 	}
 	in := textinput.New()
 	in.Prompt = "› "
-	return Model{opts: opts, input: in, now: opts.Now(), shown: true, th: themeFor(nil, nil), hoverButton: -1}
+	return Model{opts: opts, input: in, now: opts.Now(), shown: true, th: themeFor(nil, nil), hoverButton: -1,
+		branches: map[string]*branchInfo{}, autoSettled: map[int]time.Time{}}
 }
 
 // Restart reports whether the sidebar quit to restart into a new ksesh.
@@ -229,6 +286,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.hover, m.hoverButton = "", -1
+		m.hoverNew = m.onNewButton(msg.X, msg.Y)
 		if r, nth, ok := m.lineAt(msg.Y); ok && r.selectable() {
 			m.hover = rowKey(r)
 			if nth == 0 {
@@ -244,7 +302,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, tea.Tick(spinEvery, func(time.Time) tea.Msg { return animMsg{} })
 	case tea.BlurMsg:
-		m.hover, m.hoverButton = "", -1
+		m.hover, m.hoverButton, m.hoverNew = "", -1, false
 		m.focused = false
 		if m.mode != modeNormal && m.mode != modeHelp {
 			m.mode = modeNormal
@@ -278,7 +336,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.loaded = true
 			m.keepCursor()
 		}
-		var cmds []tea.Cmd
+		cmds := m.refreshBranches()
+		if msg.err == nil {
+			cmds = append(cmds, m.settleMerged()...)
+		}
 		if m.spinning() && !m.animating {
 			m.animating = true
 			cmds = append(cmds, tea.Tick(spinEvery, func(time.Time) tea.Msg { return animMsg{} }))
@@ -295,9 +356,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 		return m, tea.Batch(cmds...)
+	case branchMsg:
+		m.learn(msg)
+		if cmds := m.settleMerged(); len(cmds) > 0 {
+			return m, tea.Batch(cmds...)
+		}
+		return m, nil
 	case doneMsg:
+		m.resizing = false
 		if msg.err != nil {
 			m.say(msg.err.Error())
+			m.failed, m.until = true, m.opts.Now().Add(2*flashFor)
 		} else if msg.flash != "" {
 			m.say(msg.flash)
 		}
@@ -314,6 +383,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.MouseClickMsg:
 		return m.click(msg)
 	case tea.MouseWheelMsg:
+		if m.mode == modeHelp {
+			if msg.Button == tea.MouseWheelUp {
+				m.scrollHelp(-1)
+			} else if msg.Button == tea.MouseWheelDown {
+				m.scrollHelp(1)
+			}
+			return m, nil
+		}
 		if msg.Button == tea.MouseWheelUp {
 			m.move(-1)
 		} else if msg.Button == tea.MouseWheelDown {
@@ -324,12 +401,21 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch m.mode {
 		case modeSnooze:
 			return m.keySnooze(msg)
-		case modeSnoozeCustom, modeReply:
+		case modeSnoozeCustom, modeReply, modeRename, modeNewThread, modeNewBranch, modeNewWorktree, modeFilter:
 			return m.keyInput(msg)
 		case modeConfirmClose:
 			return m.keyConfirmClose(msg)
+		case modeConfirmArchive:
+			return m.keyConfirmArchive(msg)
 		case modeHelp:
-			m.mode = modeNormal
+			switch msg.String() {
+			case "j", "down", "ctrl+n":
+				m.scrollHelp(1)
+			case "k", "up", "ctrl+p":
+				m.scrollHelp(-1)
+			default:
+				m.mode, m.helpOffset = modeNormal, 0
+			}
 			return m, nil
 		case modeMenu:
 			return m.keyMenu(msg)
@@ -350,7 +436,7 @@ func (m Model) watch(due time.Time, pending bool) tea.Cmd {
 }
 
 func (m *Model) say(text string) {
-	m.flash, m.until = text, m.opts.Now().Add(flashFor)
+	m.flash, m.until, m.failed = text, m.opts.Now().Add(flashFor), false
 }
 
 // board is the threads in view, by section.
@@ -359,11 +445,18 @@ func (m Model) board() agent.Board {
 	if m.state.Session && m.session != "" {
 		agents = slices.DeleteFunc(slices.Clone(agents), func(a *model.Agent) bool { return a.Session != m.session })
 	}
+	if m.filter != "" {
+		agents = slices.DeleteFunc(slices.Clone(agents), func(a *model.Agent) bool { return !m.matches(a) })
+	}
 	return agent.Arrange(agents, m.now, m.opts.ThreadOpts)
 }
 
 func (m Model) rows() []row {
-	return layout(m.board(), m.state.Expanded, m.allSettled, m.current)
+	rows := layout(m.board(), m.state.Expanded, m.allSettled, m.current)
+	if m.state.Group {
+		rows = groupInbox(rows)
+	}
+	return rows
 }
 
 // spinning reports whether a working spinner is on screen to animate.
@@ -587,7 +680,29 @@ func (m Model) run(key string) (tea.Model, tea.Cmd) {
 			return m.activate()
 		}
 	case "esc", "h", "left":
+		if key == "esc" && m.filter != "" {
+			m.filter = ""
+			m.keepCursor()
+			return m, nil
+		}
 		return m, m.backToWork()
+	case "/":
+		return m.prompt(modeFilter, m.filter)
+	case "1", "2", "3", "4", "5", "6", "7", "8", "9":
+		return m.gotoNth(int(key[0] - '0'))
+	case "<":
+		return m.resize(-resizeStep)
+	case ">":
+		return m.resize(resizeStep)
+	case "o":
+		m.stateSeq++
+		st, err := UpdateState(m.opts.StatePath, func(s *State) { s.Group = !s.Group })
+		if err != nil {
+			m.say(err.Error())
+		} else {
+			m.state = st
+			m.keepCursor()
+		}
 	case "p":
 		return m.pin()
 	case "s":
@@ -626,14 +741,29 @@ func (m Model) run(key string) (tea.Model, tea.Cmd) {
 		}
 	case "r":
 		if _, ok := m.selectedAgent(); ok {
-			m.mode = modeReply
-			m.input.Placeholder = "reply, enter sends"
-			m.input.SetValue("")
-			return m, m.input.Focus()
+			return m.prompt(modeReply, "")
+		}
+	case "d":
+		return m.review()
+	case "n":
+		return m.startNewThread(false)
+	case "N":
+		return m.startNewThread(true)
+	case "R":
+		if a, ok := m.selectedAgent(); ok {
+			return m.prompt(modeRename, a.CustomTitle)
 		}
 	case "X":
 		if _, ok := m.selectedAgent(); ok {
 			m.mode = modeConfirmClose
+		}
+	case "A":
+		if a, ok := m.selectedAgent(); ok {
+			if _, ok := m.archivable(a); !ok {
+				m.say("not in a worktree of its own")
+				return m, nil
+			}
+			m.mode = modeConfirmArchive
 		}
 	case "f":
 		m.stateSeq++
@@ -836,46 +966,13 @@ func (m Model) keySnooze(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.mode = modeNormal
 		return m, nil
 	case "c":
-		m.mode = modeSnoozeCustom
-		m.input.Placeholder = "90m, 2d, 15:04, 2026-12-01 09:00"
-		m.input.SetValue("")
-		return m, m.input.Focus()
+		return m.prompt(modeSnoozeCustom, "")
 	}
 	presets := agent.SnoozePresets(m.now)
 	if n, err := strconv.Atoi(key); err == nil && n >= 1 && n <= len(presets) {
 		return m.snooze(presets[n-1].Until)
 	}
 	return m, nil
-}
-
-func (m Model) keyInput(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
-	switch msg.String() {
-	case "esc":
-		m.mode = modeNormal
-		m.input.Blur()
-		return m, nil
-	case "enter":
-		text := m.input.Value()
-		m.input.Blur()
-		if m.mode == modeSnoozeCustom {
-			until, err := agent.ParseSnooze(text, m.now)
-			if err != nil {
-				m.mode = modeNormal
-				m.say(err.Error())
-				return m, nil
-			}
-			return m.snooze(until)
-		}
-		m.mode = modeNormal
-		a, ok := m.selectedAgent()
-		if !ok || text == "" {
-			return m, nil
-		}
-		return m, m.do("sent to "+title(a), nil, func(b Backend) error { return b.SendText(a.WindowID, text, true) })
-	}
-	var cmd tea.Cmd
-	m.input, cmd = m.input.Update(msg)
-	return m, cmd
 }
 
 func (m Model) keyConfirmClose(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
@@ -908,6 +1005,9 @@ func (m Model) click(msg tea.MouseClickMsg) (tea.Model, tea.Cmd) {
 	}
 	if m.mode != modeNormal || (msg.Button != tea.MouseLeft && msg.Button != tea.MouseRight) {
 		return m, nil
+	}
+	if msg.Button == tea.MouseLeft && m.onNewButton(msg.X, msg.Y) {
+		return m.run("n")
 	}
 	r, nth, ok := m.lineAt(msg.Y)
 	if !ok || !r.selectable() {

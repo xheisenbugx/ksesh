@@ -20,6 +20,10 @@ const (
 	iconDeny      = "" // times
 	iconInterrupt = "" // stop
 	iconReply     = "" // reply
+	iconRename    = "" // pencil
+	iconReview    = "" // eye
+	iconNew       = "" // plus
+	iconBranch    = "" // code fork
 	iconClose     = "" // window close
 	iconUp        = "" // arrow up
 	iconDown      = "" // arrow down
@@ -135,10 +139,21 @@ func (m Model) threadMenu(a *model.Agent) []action {
 	case agent.Working:
 		items = append(items, byKey(iconInterrupt, "Interrupt", "x"))
 	}
-	items = append(items, byKey(iconReply, "Reply…", "r"), separator)
+	items = append(items, byKey(iconReply, "Reply…", "r"), byKey(iconReview, "Review changes", "d"), byKey(iconRename, "Rename…", "R"), separator)
+	items = append(items, byKey(iconNew, "New thread…", "n"))
+	if m.opts.Run != nil && a.Path != "" {
+		items = append(items, byKey(iconBranch, "New in a worktree…", "N"))
+	}
+	items = append(items, separator)
 	closeIt := byKey(iconClose, "Close window…", "X")
 	closeIt.danger = true
-	return append(items, closeIt)
+	items = append(items, closeIt)
+	if _, ok := m.archivable(a); ok {
+		archive := byKey(iconSettle, "Archive worktree…", "A")
+		archive.danger = true
+		items = append(items, archive)
+	}
+	return items
 }
 
 // snoozeAction opens the snooze times in place of the menu it is in.
@@ -165,10 +180,7 @@ func (m Model) snoozeMenu() []action {
 		}})
 	}
 	return append(items, separator, action{icon: "c", label: "Other time…", key: "c", hint: " ", run: func(m Model) (tea.Model, tea.Cmd) {
-		m.mode = modeSnoozeCustom
-		m.input.Placeholder = "90m, 2d, 15:04, 2026-12-01 09:00"
-		m.input.SetValue("")
-		return m, m.input.Focus()
+		return m.prompt(modeSnoozeCustom, "")
 	}})
 }
 

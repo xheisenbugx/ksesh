@@ -1,9 +1,13 @@
 package seshcli
 
 import (
+	"cmp"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"log/slog"
 	"os"
+	"os/exec"
 	"os/signal"
 	"slices"
 	"strconv"
@@ -15,9 +19,12 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/xheisenbugx/ksesh/agent"
+	"github.com/xheisenbugx/ksesh/cache"
+	"github.com/xheisenbugx/ksesh/github"
 	"github.com/xheisenbugx/ksesh/kitty"
 	"github.com/xheisenbugx/ksesh/model"
 	"github.com/xheisenbugx/ksesh/sidebar"
+	"github.com/xheisenbugx/ksesh/worktree"
 )
 
 // threadOpts reads [sidebar]'s triage settings.
@@ -29,19 +36,33 @@ func threadOpts(cfg model.Config) agent.ThreadOpts {
 	return opts
 }
 
-// sidebarOpts is how sidebars are docked, running this very binary.
-func sidebarOpts(cmd *cobra.Command, cfg model.Config) (kitty.SidebarOpts, error) {
+// kseshCommand runs this very binary, with the config it was given.
+func kseshCommand(cmd *cobra.Command) ([]string, error) {
 	exe, err := os.Executable()
 	if err != nil {
-		return kitty.SidebarOpts{}, err
+		return nil, err
 	}
 	command := []string{exe}
 	if configPath, _ := cmd.Root().PersistentFlags().GetString("config"); configPath != "" {
 		command = append(command, "--config", configPath)
 	}
+	return command, nil
+}
+
+// sidebarOpts is how sidebars are docked, running this very binary: as wide
+// as you last made one with < and >, else [sidebar] width.
+func sidebarOpts(cmd *cobra.Command, cfg model.Config) (kitty.SidebarOpts, error) {
+	command, err := kseshCommand(cmd)
+	if err != nil {
+		return kitty.SidebarOpts{}, err
+	}
+	size := cfg.Sidebar.Width
+	if path, err := sidebar.StatePath(); err == nil {
+		size = cmp.Or(sidebar.LoadState(path).Width, size)
+	}
 	return kitty.SidebarOpts{
 		Edge:    cfg.Sidebar.Edge,
-		Size:    cfg.Sidebar.Width,
+		Size:    size,
 		Command: append(command, "sidebar"),
 	}, nil
 }
@@ -85,12 +106,27 @@ Needs listen_on in kitty.conf: a TUI can't share its tty with remote control.`,
 				return err
 			}
 			exe, _ := os.Executable()
+			ksesh, _ := kseshCommand(cmd)
+			var env []string
+			if p := os.Getenv("PATH"); p != "" {
+				env = append(env, "PATH="+p)
+			}
+			dock, err := sidebarOpts(cmd, deps.Config)
+			if err != nil {
+				return err
+			}
 			opts := sidebar.Options{
-				Backend:    deps.Threads,
-				Self:       self,
-				ThreadOpts: threadOpts(deps.Config),
-				StatePath:  path,
-				Changed:    rebuilt(exe),
+				Dock:         dock,
+				Backend:      deps.Threads,
+				Self:         self,
+				ThreadOpts:   threadOpts(deps.Config),
+				StatePath:    path,
+				Changed:      rebuilt(exe),
+				Ksesh:        ksesh,
+				Env:          env,
+				AgentCommand: deps.Worktree.AgentCommand,
+				Run:          runKsesh(ksesh),
+				Repos:        newSidebarRepos(deps),
 			}
 			// Read kitty from the snapshot contrib/ksesh_snapshot.py keeps,
 			// and look again when it changes, rather than every sidebar
@@ -128,10 +164,95 @@ Needs listen_on in kitty.conf: a TUI can't share its tty with remote control.`,
 		newSidebarFocusCommand(base),
 		newSidebarStepCommand(base, "next", 1),
 		newSidebarStepCommand(base, "prev", -1),
+		newSidebarGotoCommand(base),
 		newSidebarPrintCommand(base),
 		newSidebarOverlayCommand(base),
 	)
 	return cmd
+}
+
+// sidebarRepos tells the sidebar about threads' branches: git through the
+// worktree code, as `ksesh wt status` counts commits, and gh for pull
+// requests, cached in a file every tab's sidebar shares, so that one asking
+// GitHub spares the others.
+type sidebarRepos struct {
+	wt  worktree.Worktree
+	gh  github.Github
+	prs *cache.Namespace[model.PullRequestState]
+}
+
+// The pull request cache: as long as the sidebar keeps an answer itself.
+const (
+	prCacheName    = "sidebar-prs"
+	prCacheVersion = 1
+	prCacheTTL     = 5 * time.Minute
+)
+
+func newSidebarRepos(deps *Deps) sidebarRepos {
+	return sidebarRepos{
+		wt:  deps.Worktree,
+		gh:  deps.Github,
+		prs: cache.NewNamespace[model.PullRequestState](prCacheName, prCacheVersion, prCacheTTL),
+	}
+}
+
+func (r sidebarRepos) BranchStatus(dir string) (model.BranchStatus, error) {
+	return r.wt.BranchStatus(dir)
+}
+
+func (r sidebarRepos) PullRequest(dir, branch string) (model.PullRequestState, bool, error) {
+	key := dir + "\x00" + branch
+	if pr, found, fresh := r.prs.Lookup(r.prs.Load(), key); fresh {
+		return pr, found, nil
+	}
+	pr, found, err := r.gh.PrState(dir)
+	if err != nil {
+		return pr, false, err
+	}
+	// Read again: another sidebar may have written since.
+	entries := r.prs.Load()
+	if found {
+		entries.Put(key, pr)
+	} else {
+		entries.PutMissing(key)
+	}
+	if err := r.prs.Save(entries); err != nil {
+		slog.Debug("sidebar: couldn't cache a pull request", "error", err)
+	}
+	return pr, found, nil
+}
+
+// runKsesh runs ksesh (the command line kseshCommand gives) with args in dir,
+// for the sidebar to leave a job to one of ksesh's own commands. Its error
+// is the one the command printed.
+func runKsesh(ksesh []string) func(dir string, args ...string) error {
+	return func(dir string, args ...string) error {
+		if len(ksesh) == 0 {
+			return fmt.Errorf("don't know where ksesh is")
+		}
+		c := exec.Command(ksesh[0], append(slices.Clone(ksesh[1:]), args...)...)
+		c.Dir = dir
+		out, err := c.CombinedOutput()
+		if err == nil {
+			return nil
+		}
+		if msg := commandError(string(out)); msg != "" {
+			return errors.New(msg)
+		}
+		return fmt.Errorf("ksesh %s: %w", strings.Join(args, " "), err)
+	}
+}
+
+// commandError is the error a ksesh command printed: cobra's "Error: …"
+// line, else its last line.
+func commandError(out string) string {
+	lines := strings.Split(strings.TrimSpace(out), "\n")
+	for _, line := range lines {
+		if msg, ok := strings.CutPrefix(line, "Error: "); ok {
+			return msg
+		}
+	}
+	return strings.TrimSpace(lines[len(lines)-1])
 }
 
 // rebuilt reports whether the binary at exe was replaced since the sidebar
@@ -246,14 +367,61 @@ func newSidebarFocusCommand(base *BaseDeps) *cobra.Command {
 }
 
 // sidebarOrder is the threads in the order the sidebar lists them, leaving
-// out the snoozed and settled ones, which it keeps out of the way.
+// out the snoozed and settled ones, which it keeps out of the way. Like the
+// sidebar, it keeps to this session's threads after f, and groups the inbox
+// by session after o.
 func sidebarOrder(deps *Deps) ([]*model.Agent, error) {
 	agents, err := deps.Kitty.ListAgents()
 	if err != nil {
 		return nil, err
 	}
+	var st sidebar.State
+	if path, err := sidebar.StatePath(); err == nil {
+		st = sidebar.LoadState(path)
+	}
+	if st.Session {
+		if current, err := deps.Kitty.GetCurrentSession(); err == nil && current != "" {
+			agents = slices.DeleteFunc(agents, func(a *model.Agent) bool { return a.Session != current })
+		}
+	}
 	board := agent.Arrange(agents, time.Now(), threadOpts(deps.Config))
-	return board.Ordered(agent.Pinned, agent.Active, agent.SectionWorking), nil
+	return sidebar.Order(board, st.Group), nil
+}
+
+func newSidebarGotoCommand(base *BaseDeps) *cobra.Command {
+	return &cobra.Command{
+		Use:   "goto <n>",
+		Short: "Go to the nth thread of the sidebar",
+		Long: `Go to the nth thread down the sidebar, from 1, in the order 'ksesh sidebar next'
+steps through: pinned, the inbox, then working, leaving out the snoozed and
+settled ones. 1 to 9 do the same in the sidebar. Bind it in kitty.conf:
+
+    map super+ctrl+1 launch --type=background --allow-remote-control ksesh sidebar goto 1`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			n, err := strconv.Atoi(args[0])
+			if err != nil || n < 1 {
+				return fmt.Errorf("goto takes a thread's place in the sidebar, from 1: %q", args[0])
+			}
+			deps, err := buildDeps(cmd, base)
+			if err != nil {
+				return err
+			}
+			return gotoThread(deps, n)
+		},
+	}
+}
+
+// gotoThread focuses the nth thread, from 1, of the sidebar's order.
+func gotoThread(deps *Deps, n int) error {
+	threads, err := sidebarOrder(deps)
+	if err != nil {
+		return err
+	}
+	if n > len(threads) {
+		return fmt.Errorf("no thread %d: the sidebar has %d", n, len(threads))
+	}
+	return deps.Kitty.FocusWindow(threads[n-1].WindowID)
 }
 
 func newSidebarStepCommand(base *BaseDeps, name string, delta int) *cobra.Command {
@@ -352,6 +520,9 @@ func threadID(a *model.Agent) string {
 }
 
 func threadLabel(a *model.Agent) string {
+	if a.CustomTitle != "" {
+		return a.CustomTitle
+	}
 	if t := agent.CleanTitle(a.Title); t != "" {
 		return t
 	}

@@ -1,6 +1,7 @@
 package sidebar
 
 import (
+	"cmp"
 	"fmt"
 	"strconv"
 	"strings"
@@ -17,6 +18,15 @@ import (
 // headerLines are the title, the line under it and a blank one.
 const headerLines = 3
 
+// newButtonWidth is the cells of the new thread button at the right end of
+// the title.
+const newButtonWidth = 3
+
+// onNewButton reports whether x, y of the screen is on the new thread button.
+func (m Model) onNewButton(x, y int) bool {
+	return y == 0 && x >= m.width-newButtonWidth && x < m.width
+}
+
 // Icons beyond the status ones in agent.GlyphFor: single-cell Font Awesome
 // glyphs from a nerd font, like those.
 const (
@@ -29,8 +39,19 @@ const (
 	iconClosed = "" // history: a closed thread, to resume
 )
 
-// here marks the thread you're on, and the closed shelf hiding it.
-const here = "●"
+// iconFolder stands for a session, over its threads in the grouped inbox;
+// iconSearch for the filter.
+const (
+	iconFolder = ""
+	iconSearch = ""
+)
+
+// here marks the thread you're on, and the closed shelf hiding it;
+// unreadMark a thread that finished while you weren't looking.
+const (
+	here       = "●"
+	unreadMark = "•"
+)
 
 // spinner animates the icon of working threads.
 var spinner = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
@@ -112,8 +133,8 @@ func (m Model) View() tea.View {
 		help := m.helpLines()
 		for i := range m.listHeight() {
 			line := ""
-			if i < len(help) {
-				line = paint(help[i], "", m.width)
+			if j := i + m.helpOffset; j < len(help) {
+				line = paint(help[j], "", m.width)
 			}
 			out = append(out, line)
 		}
@@ -155,22 +176,31 @@ func (m Model) View() tea.View {
 }
 
 // title is the sidebar's masthead, in the manner of Crush's: the name on a
-// gradient running out into stripes, and under it the scope and what needs
-// you, by kind.
+// gradient running out into stripes, a + for a new thread, and under it the
+// scope and what needs you, by kind.
 //
-//	Threads ╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱
+//	Threads ╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱  +
 //	all sessions · 6             1  1
 func (m Model) title() []string {
 	name := " Threads "
-	stripes := strings.Repeat("╱", max(m.width-ansi.StringWidth(name)-1, 0))
-	top := m.th.gradient(name+stripes, len([]rune(name)))
+	// At the right end, the new thread button.
+	stripes := strings.Repeat("╱", max(m.width-ansi.StringWidth(name)-newButtonWidth, 0))
+	plus := " " + m.th.accented(iconNew) + " "
+	if m.hoverNew {
+		plus = m.th.button + plus + "\033[49m"
+	}
+	top := m.th.gradient(name+stripes, len([]rune(name))) + plus
 
 	scope := "all sessions"
 	if m.state.Session && m.session != "" {
 		scope = m.session
 	}
 	left := " " + m.th.mute(scope)
-	if m.loaded {
+	switch {
+	case m.loaded && m.filter != "":
+		// How many of them the filter keeps.
+		left += m.th.dim(" · ") + m.th.accented("/"+m.filter) + " " + m.th.mute(strconv.Itoa(len(m.board().Ordered(agent.Sections...))))
+	case m.loaded:
 		live := 0
 		for _, a := range m.agents {
 			if !a.Closed {
@@ -249,6 +279,8 @@ func (m Model) renderRow(r row) []string {
 		return []string{paint(m.bar(r)+"   "+m.th.mute(fmt.Sprintf("⋯ %d more", r.count)), bg, m.width)}
 	case rowHeader:
 		return []string{m.renderHeader(r, bg)}
+	case rowGroup:
+		return []string{m.renderGroup(r)}
 	}
 	return m.renderThread(r, bg)
 }
@@ -256,8 +288,11 @@ func (m Model) renderRow(r row) []string {
 // renderEmpty is the inbox with nothing in it, centered.
 func (m Model) renderEmpty(r row) []string {
 	icon, head, sub := fg(ansicolor.Green, iconDone), "All caught up", "nothing needs you"
-	if r.none {
-		icon, head, sub = m.th.mute(iconRobot), "No agents yet", "start one in any tab"
+	switch {
+	case m.filter != "":
+		icon, head, sub = m.th.mute(iconSearch), "Nothing in the inbox", "matches /"+m.filter+", esc clears it"
+	case r.none:
+		icon, head, sub = m.th.mute(iconRobot), "No agents yet", "n starts one here"
 	}
 	center := func(s string) string {
 		pad := max((m.width-ansi.StringWidth(s))/2, 0)
@@ -313,6 +348,18 @@ func (m Model) renderHeader(r row, bg string) string {
 	return paint(spread(left, right, m.width), bg, m.width)
 }
 
+// renderGroup names the session of the inbox threads under it, its rule
+// running to their count:
+//
+//	api ─────────────────── 2
+func (m Model) renderGroup(r row) string {
+	name := cmpOr(r.session, "no session")
+	label := "  " + m.th.mute(iconFolder) + " " + m.th.head(name) + " "
+	count := " " + m.th.mute(strconv.Itoa(r.count)) + " "
+	rule := max(m.width-ansi.StringWidth(label)-ansi.StringWidth(count), 0)
+	return paint(label+m.th.dim(strings.Repeat("─", rule))+count, "", m.width)
+}
+
 func badgeIcon(badge agent.Badge) (string, int) {
 	switch badge {
 	case agent.BadgeWoke:
@@ -330,9 +377,12 @@ func badgeIcon(badge agent.Badge) (string, int) {
 //
 //	▌ ⠹ Fix the login flow        2m ●
 //	    api · Allow Bash: npm test
+//	 •✓ Write the README          5m
 //
-// The accent bar is the selection, the dot the thread you're on; the title
-// is bold when it needs you, muted when put away (snoozed, settled).
+// The accent bar is the selection, the dot at the right the thread you're
+// on, the one at the left a thread that finished while you weren't looking
+// (unread); the title is bold when it needs you, muted when put away
+// (snoozed, settled).
 func (m Model) renderThread(r row, bg string) []string {
 	a, section := r.agent, r.section
 	badge := agent.BadgeOf(a, m.now)
@@ -365,25 +415,36 @@ func (m Model) renderThread(r row, bg string) []string {
 	// bar, space, icon, space | title | space, right
 	room := max(m.width-4-1-ansi.StringWidth(right), 1)
 	name := ansi.Truncate(title(a), room, "…")
-	needsYou := badge == agent.Badge(agent.Waiting) || badge == agent.Badge(agent.Error) ||
-		badge == agent.Badge(agent.Done) || badge == agent.BadgeWoke
+	unread := !putAway && agent.IsUnread(a)
+	needsYou := unread || badge == agent.Badge(agent.Waiting) || badge == agent.Badge(agent.Error) || badge == agent.BadgeWoke
 	switch {
 	case putAway:
 		name = m.th.mute(name)
 	case needsYou:
 		name = bold(name)
 	}
+	mark := " "
+	if unread {
+		mark = m.th.accented(unreadMark)
+	}
 	gap := strings.Repeat(" ", max(room-ansi.StringWidth(ansi.Strip(name)), 0)+1)
-	first := bar + " " + iconText + " " + name + gap + right
+	first := bar + mark + iconText + " " + name + gap + right
 	second := bar + "   " + m.subtitle(a, section, badge)
 	return []string{paint(first, bg, m.width), paint(second, bg, m.width), paint("", "", m.width)}
 }
 
+// minSubtitle is the least of a thread's session and what it is on that the
+// branch at the right of its second line leaves.
+const minSubtitle = 10
+
 // subtitle is a thread's second line: its session, and what it needs, did or
-// is on.
+// is on, then at the right the branch it is on, when that fits.
+//
+//	api · Added a Threads section   docs ↑2  #12
 func (m Model) subtitle(a *model.Agent, section agent.Section, badge agent.Badge) string {
 	where := a.Session
-	if where == title(a) {
+	// Grouped, the inbox says each thread's session once, over them.
+	if where == title(a) || (m.state.Group && section == agent.Active) {
 		where = ""
 	}
 	what, color := "", 0
@@ -420,6 +481,22 @@ func (m Model) subtitle(a *model.Agent, section agent.Section, badge agent.Badge
 	if where != "" && what != "" {
 		where += " · "
 	}
+	// The branch goes at the right, when there is room for it: what the
+	// agent needs comes first, and anything else is cut to make room, down
+	// to a few cells.
+	label := m.branchLabel(a)
+	if label != "" {
+		need := ansi.StringWidth(label) + 2
+		full := ansi.StringWidth(where) + ansi.StringWidth(what)
+		switch {
+		case full+need <= room:
+		case color != 0 || room-need < minSubtitle:
+			label = ""
+		}
+		if label != "" {
+			room -= need
+		}
+	}
 	// Where it runs stays quiet; only what it needs is colored.
 	where = ansi.Truncate(where, room, "…")
 	what = ansi.Truncate(what, max(room-ansi.StringWidth(where), 0), "…")
@@ -433,6 +510,9 @@ func (m Model) subtitle(a *model.Agent, section agent.Section, badge agent.Badge
 		} else {
 			out += m.th.mute(what)
 		}
+	}
+	if label != "" {
+		out += strings.Repeat(" ", max(room-ansi.StringWidth(out), 0)+2) + label
 	}
 	return out
 }
@@ -485,25 +565,8 @@ func short(d time.Duration) string {
 	return strconv.Itoa(int(d.Hours()/24)) + "d"
 }
 
-// title is what a thread is called: the title the agent gave its window
-// (Claude Code's is a summary of the conversation), unless it is only the
-// agent's own name, then its session.
-func title(a *model.Agent) string {
-	for _, t := range []string{a.Title, a.TabTitle} {
-		t = agent.CleanTitle(t)
-		if t != "" && !strings.EqualFold(t, a.Name) && !strings.EqualFold(t, "Claude Code") {
-			return t
-		}
-	}
-	if a.Session != "" {
-		return a.Session
-	}
-	if a.Path != "" {
-		parts := strings.Split(strings.TrimRight(a.Path, "/"), "/")
-		return parts[len(parts)-1]
-	}
-	return "window " + strconv.Itoa(a.WindowID)
-}
+// title is what a thread is called: see agent.Title.
+func title(a *model.Agent) string { return agent.Title(a) }
 
 // hint is a key and what it does, for the footer.
 type hint struct{ key, does string }
@@ -512,7 +575,7 @@ type hint struct{ key, does string }
 func (m Model) hints() []hint {
 	r, _, ok := m.selected()
 	if !ok {
-		return []hint{{"?", "keys"}}
+		return []hint{{"n", "new thread"}, {"?", "keys"}}
 	}
 	switch r.kind {
 	case rowHeader:
@@ -546,7 +609,10 @@ func (m Model) hints() []hint {
 	if agent.BadgeOf(a, m.now) == agent.BadgeWoke {
 		return []hint{{"↵", "go"}, {"w", "dismiss"}, {"s", "settle"}, {"?", "keys"}}
 	}
-	return []hint{{"↵", "go"}, {"s", "settle"}, {"p", pin}, {"z", "snooze"}, {"?", "keys"}}
+	if agent.Status(a.Status) == agent.Done {
+		return []hint{{"↵", "go"}, {"d", "review"}, {"s", "settle"}, {"p", pin}, {"?", "keys"}}
+	}
+	return []hint{{"↵", "go"}, {"s", "settle"}, {"p", pin}, {"z", "snooze"}, {"d", "review"}, {"?", "keys"}}
 }
 
 // key is a key as the footer and the help show it.
@@ -576,6 +642,9 @@ func (m Model) hintLine(hints []hint) string {
 func (m Model) footer() []string {
 	line := func(s string) string { return paint(s, "", m.width) }
 	lines := []string{" " + m.th.dim(strings.Repeat("─", max(m.width-2, 0))) + " "}
+	if in, ok := inputs[m.mode]; ok {
+		return append(lines, line(" "+m.th.accented(bold(cmp.Or(m.ask, in.label)))), line(" "+m.input.View()))
+	}
 	switch m.mode {
 	case modeSnooze:
 		lines = append(lines, line(" "+m.th.accented(bold("Snooze until"))))
@@ -583,10 +652,6 @@ func (m Model) footer() []string {
 			lines = append(lines, spread(" "+m.key(strconv.Itoa(i+1))+" "+p.Label, m.th.mute(when(p.Until, m.now)), m.width))
 		}
 		return append(lines, line(" "+m.key("c")+" "+m.th.mute("other time")+m.th.dim(" · ")+m.key("esc")+" "+m.th.mute("cancel")))
-	case modeSnoozeCustom:
-		return append(lines, line(" "+m.th.accented(bold("Snooze for, or until"))), line(" "+m.input.View()))
-	case modeReply:
-		return append(lines, line(" "+m.th.accented(bold("Reply"))), line(" "+m.input.View()))
 	case modeMenu:
 		return append(lines, m.hintLine([]hint{{"↵", "pick"}, {"j k", "move"}, {"esc", "close"}}))
 	case modeConfirmClose:
@@ -595,17 +660,38 @@ func (m Model) footer() []string {
 			ask = "Forget the closed thread?"
 		}
 		return append(lines, line(" "+fg(ansicolor.Red, ask)+" "+m.key("y")+m.th.mute("/n")))
+	case modeConfirmArchive:
+		return append(lines, line(" "+fg(ansicolor.Red, "Remove its worktree, branch")), line(" "+fg(ansicolor.Red, "and window?")+" "+m.key("y")+m.th.mute("/n")))
 	}
 	if m.flash != "" && m.opts.Now().Before(m.until) {
+		if m.failed {
+			// What went wrong is worth reading whole: on up to three lines.
+			wrapped := strings.Split(ansi.Wrap(m.flash, max(m.width-4, 1), ""), "\n")
+			for i, l := range wrapped[:min(len(wrapped), 3)] {
+				mark := "  "
+				if i == 0 {
+					mark = fg(ansicolor.Red, "✗") + " "
+				}
+				lines = append(lines, line(" "+mark+l))
+			}
+			return lines
+		}
 		return append(lines, line(" "+fg(ansicolor.Green, "✓")+" "+m.flash))
 	}
 	if b, ok := m.hoveredButton(); ok {
 		return append(lines, line(" "+m.th.accented(b.icon)+"  "+b.label+"  "+m.key(b.key)))
 	}
+	if m.hoverNew && m.mode == modeNormal {
+		return append(lines, line(" "+m.th.accented(iconNew)+"  new thread  "+m.key("n")))
+	}
 	if !m.focused {
 		return append(lines, line(""))
 	}
-	return append(lines, m.hintLine(m.hints()))
+	hints := m.hints()
+	if m.filter != "" {
+		hints = append([]hint{{"esc", "unfilter"}}, hints...)
+	}
+	return append(lines, m.hintLine(hints))
 }
 
 // helpLines is the help screen, shown in place of the list.
@@ -620,6 +706,8 @@ func (m Model) helpLines() []string {
 		entry("esc h", "back to your window"),
 		entry("j k g G", "move"),
 		entry("tab", "next section"),
+		entry("1-9", "go to the nth thread"),
+		entry("n N", "new thread, worktree"),
 		"",
 		section("Triage"),
 		entry("p", "pin, unpin"),
@@ -633,12 +721,23 @@ func (m Model) helpLines() []string {
 		entry("a", "approve"),
 		entry("x", "deny, interrupt"),
 		entry("r", "reply"),
+		entry("d", "review its changes"),
+		entry("R", "rename the thread"),
 		entry("X", "close its window, forget"),
+		entry("A", "archive its worktree"),
 		"",
 		section("Sidebar"),
+		entry("/", "filter; esc clears it"),
+		entry("o", "group by session"),
 		entry("f", "this session, all"),
+		entry("< >", "narrower, wider"),
 		entry("q", "hide everywhere"),
 		"",
-		"  " + m.th.mute("any key to go back"),
+		"  " + m.th.mute("j k scroll, other keys: back"),
 	}
+}
+
+// scrollHelp moves the help screen by delta lines, as far as it goes.
+func (m *Model) scrollHelp(delta int) {
+	m.helpOffset = max(min(m.helpOffset+delta, len(m.helpLines())-m.listHeight()), 0)
 }
