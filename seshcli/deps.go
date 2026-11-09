@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strconv"
 
 	"github.com/spf13/cobra"
 
@@ -164,6 +165,7 @@ func (b *BaseDeps) BuildAll(configPath string) (*Deps, error) {
 	// No home to keep the thread history in is no history, not an error.
 	historyDir, _ := threads.DefaultDir()
 	th := threads.NewKitty(t, threads.NewStore(historyDir), n, threads.RetentionOf(config.Sidebar))
+	th.Self, _ = strconv.Atoi(b.Os.Getenv("KITTY_WINDOW_ID"))
 
 	return &Deps{
 		BaseDeps:      *b,

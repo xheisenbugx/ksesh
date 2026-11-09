@@ -63,6 +63,10 @@ type Kitty struct {
 	keep  Retention
 	// Now is the clock, for tests.
 	Now func() time.Time
+	// Self is the kitty window ksesh runs in, which kitty's ListAgents
+	// leaves out: when an agent runs ksesh, that is its own window, and its
+	// thread is open, not closed. 0 is none.
+	Self int
 
 	mu       sync.Mutex
 	convs    map[int]string // each live window's conversation, as last listed
@@ -103,6 +107,10 @@ func (k *Kitty) ListAgents() ([]*model.Agent, error) {
 			convs[a.WindowID] = a.Conversation
 		}
 	}
+	if conv := ownConversation(records, k.Self); conv != "" && !open[conv] {
+		open[conv] = true
+		records = slices.DeleteFunc(slices.Clone(records), func(r model.ThreadRecord) bool { return r.Conversation == conv })
+	}
 	k.mu.Lock()
 	k.convs = convs
 	prune := now.Sub(k.prunedAt) >= pruneEvery
@@ -123,6 +131,21 @@ func (k *Kitty) ListAgents() ([]*model.Agent, error) {
 		records = slices.DeleteFunc(records, func(r model.ThreadRecord) bool { return slices.Contains(expired, r.Conversation) })
 	}
 	return agent.WithClosed(live, records), nil
+}
+
+// ownConversation is the conversation last seen in the window ksesh runs
+// in, which kitty doesn't list: the latest of the records naming it.
+func ownConversation(records []model.ThreadRecord, self int) string {
+	if self == 0 {
+		return ""
+	}
+	var own model.ThreadRecord
+	for _, r := range records {
+		if r.WindowID == self && r.UpdatedAt.After(own.UpdatedAt) {
+			own = r
+		}
+	}
+	return own.Conversation
 }
 
 // sync writes what the live windows show of their threads into their

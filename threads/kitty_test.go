@@ -220,3 +220,23 @@ func TestARenamedThreadKeepsItsTitleOnceClosed(t *testing.T) {
 	assert.True(t, agents[0].Closed)
 	assert.Equal(t, "Login redirect", agents[0].CustomTitle)
 }
+
+func TestTheWindowKseshRunsInHoldsAnOpenThread(t *testing.T) {
+	k, mk, _ := newKitty(t)
+	k.Self = 4
+	for _, r := range []model.ThreadRecord{
+		{Conversation: "earlier", Agent: "claude", WindowID: 4, Status: "done", StatusAt: now.Add(-3 * time.Hour), UpdatedAt: now.Add(-3 * time.Hour)},
+		{Conversation: "mine", Agent: "claude", WindowID: 4, Status: "working", StatusAt: now.Add(-time.Minute), UpdatedAt: now.Add(-time.Minute)},
+	} {
+		require.NoError(t, k.store.Update(r.Conversation, func(x *model.ThreadRecord) { *x = r }))
+	}
+	// kitty leaves out the window ksesh runs in: an agent running ksesh.
+	mk.EXPECT().ListAgents().Return(nil, nil)
+
+	agents, err := k.ListAgents()
+
+	require.NoError(t, err)
+	require.Len(t, agents, 1, "its own conversation isn't closed")
+	assert.Equal(t, "earlier", agents[0].Conversation, "one it had before is")
+	assert.True(t, agents[0].Closed)
+}
