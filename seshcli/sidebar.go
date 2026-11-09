@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
@@ -526,6 +527,13 @@ func threadLabel(a *model.Agent) string {
 	if t := agent.CleanTitle(a.Title); t != "" {
 		return t
 	}
+	if a.Closed && a.Session == "" {
+		// No window to name it by: where it ran, else its conversation.
+		if a.Path != "" {
+			return filepath.Base(a.Path)
+		}
+		return a.Conversation
+	}
 	return agentWhere(a)
 }
 
@@ -665,6 +673,9 @@ prefix of it.`,
 				a, err := closedThread(deps, args[0])
 				if err != nil {
 					return err
+				}
+				if !a.Closed {
+					return fmt.Errorf("%s is still open in window %d: close it first", threadLabel(a), a.WindowID)
 				}
 				if err := deps.Threads.ForgetThread(a.Conversation); err != nil {
 					return err

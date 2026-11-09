@@ -233,10 +233,6 @@ func TestForget(t *testing.T) {
 }
 
 func TestForgetLeavesAnOpenThreadAlone(t *testing.T) {
-	t.Skip("bug: closedThread (seshcli/sidebar.go) matches a conversation exactly whether or not it is closed, " +
-		"which resume relies on to go to an open thread; forget uses it too, so 'ksesh agent forget <open conversation>' " +
-		"deletes the history of a thread still open in a window (its pin, title and status outlive the window no more) " +
-		"and prints \"forgot …\" for a thread that isn't closed")
 	c := newCLI(t, threadsLs(2))
 	closedRecord(t, c, "conv-1", func(r *model.ThreadRecord) { r.WindowID = 1 })
 
@@ -248,9 +244,6 @@ func TestForgetLeavesAnOpenThreadAlone(t *testing.T) {
 }
 
 func TestPrintNamesAClosedThreadWithoutATitle(t *testing.T) {
-	t.Skip("bug: threadLabel falls back to agentWhere (seshcli/agent_view.go), which names a thread without a title, " +
-		"custom title or session by its window: a closed thread has none, so 'ksesh sidebar print' (and 'agent forget') " +
-		"call it \"window 0\"; its directory or conversation would say which thread it is")
 	c := newCLI(t, plainLs())
 	closedRecord(t, c, "conv-untitled", func(r *model.ThreadRecord) { r.Cwd = "/c/api" })
 
