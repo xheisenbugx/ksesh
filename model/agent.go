@@ -11,6 +11,8 @@ type Agent struct {
 	// Title is the window's own title, which agents such as Claude Code set
 	// to a summary of what they are on.
 	Title string `json:"title,omitempty"`
+	// CustomTitle is the title you gave the thread, which wins over Title.
+	CustomTitle string `json:"custom_title,omitempty"`
 	// Session is the name ksesh shows for the window's kitty session, empty
 	// for a window outside any session.
 	Session string `json:"session"`

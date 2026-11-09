@@ -260,8 +260,10 @@ background and foreground, so it suits light and dark themes alike; the
 selected row is tinted with the accent and marked with a bar, the one under
 the mouse is lifted a little.
 
-Each thread shows the title its agent gave it, how long ago it last did
-something, and under that its session and what it needs, did or is on. Titles
+Each thread shows the title its agent gave it (or the one you gave it with
+`R`, kept in `ksesh_title` and shown by `ksesh agent list` too), how long ago
+it last did something, and under that its session and what it needs, did or
+is on. Titles
 of threads that need you are bold, and a waiting or failed agent's message is
 colored. Working agents spin, a closed shelf holding the thread you're in shows
 its `●`, and the status bar only offers the keys that do something for the
@@ -302,6 +304,7 @@ In the sidebar:
 | `u`          | undo the last pin, settle, snooze or wake             |
 | `m`          | the thread's menu, also a right click                 |
 | `a` `x` `r`  | approve, deny or interrupt, reply, without switching  |
+| `R`          | rename the thread; empty goes back to the agent's title |
 | `X`          | close the agent's window (asks first)                 |
 | `f`          | only this tab's session, or every session             |
 | `q`          | hide the sidebar in every tab                         |

@@ -332,6 +332,9 @@ func newSidebarPrintCommand(base *BaseDeps) *cobra.Command {
 }
 
 func threadLabel(a *model.Agent) string {
+	if a.CustomTitle != "" {
+		return a.CustomTitle
+	}
 	if t := agent.CleanTitle(a.Title); t != "" {
 		return t
 	}

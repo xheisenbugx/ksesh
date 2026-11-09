@@ -468,25 +468,8 @@ func short(d time.Duration) string {
 	return strconv.Itoa(int(d.Hours()/24)) + "d"
 }
 
-// title is what a thread is called: the title the agent gave its window
-// (Claude Code's is a summary of the conversation), unless it is only the
-// agent's own name, then its session.
-func title(a *model.Agent) string {
-	for _, t := range []string{a.Title, a.TabTitle} {
-		t = agent.CleanTitle(t)
-		if t != "" && !strings.EqualFold(t, a.Name) && !strings.EqualFold(t, "Claude Code") {
-			return t
-		}
-	}
-	if a.Session != "" {
-		return a.Session
-	}
-	if a.Path != "" {
-		parts := strings.Split(strings.TrimRight(a.Path, "/"), "/")
-		return parts[len(parts)-1]
-	}
-	return "window " + strconv.Itoa(a.WindowID)
-}
+// title is what a thread is called: see agent.Title.
+func title(a *model.Agent) string { return agent.Title(a) }
 
 // hint is a key and what it does, for the footer.
 type hint struct{ key, does string }
@@ -557,6 +540,9 @@ func (m Model) hintLine(hints []hint) string {
 func (m Model) footer() []string {
 	line := func(s string) string { return paint(s, "", m.width) }
 	lines := []string{" " + m.th.dim(strings.Repeat("─", max(m.width-2, 0))) + " "}
+	if in, ok := inputs[m.mode]; ok {
+		return append(lines, line(" "+m.th.accented(bold(in.label))), line(" "+m.input.View()))
+	}
 	switch m.mode {
 	case modeSnooze:
 		lines = append(lines, line(" "+m.th.accented(bold("Snooze until"))))
@@ -564,10 +550,6 @@ func (m Model) footer() []string {
 			lines = append(lines, spread(" "+m.key(strconv.Itoa(i+1))+" "+p.Label, m.th.mute(when(p.Until, m.now)), m.width))
 		}
 		return append(lines, line(" "+m.key("c")+" "+m.th.mute("other time")+m.th.dim(" · ")+m.key("esc")+" "+m.th.mute("cancel")))
-	case modeSnoozeCustom:
-		return append(lines, line(" "+m.th.accented(bold("Snooze for, or until"))), line(" "+m.input.View()))
-	case modeReply:
-		return append(lines, line(" "+m.th.accented(bold("Reply"))), line(" "+m.input.View()))
 	case modeMenu:
 		return append(lines, m.hintLine([]hint{{"↵", "pick"}, {"j k", "move"}, {"esc", "close"}}))
 	case modeConfirmClose:
@@ -610,6 +592,7 @@ func (m Model) helpLines() []string {
 		entry("a", "approve"),
 		entry("x", "deny, interrupt"),
 		entry("r", "reply"),
+		entry("R", "rename the thread"),
 		entry("X", "close its window"),
 		"",
 		section("Sidebar"),

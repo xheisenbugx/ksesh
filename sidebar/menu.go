@@ -20,6 +20,7 @@ const (
 	iconDeny      = "" // times
 	iconInterrupt = "" // stop
 	iconReply     = "" // reply
+	iconRename    = "" // pencil
 	iconClose     = "" // window close
 	iconUp        = "" // arrow up
 	iconDown      = "" // arrow down
@@ -118,7 +119,7 @@ func (m Model) threadMenu(a *model.Agent) []action {
 	case agent.Working:
 		items = append(items, byKey(iconInterrupt, "Interrupt", "x"))
 	}
-	items = append(items, byKey(iconReply, "Reply…", "r"), separator)
+	items = append(items, byKey(iconReply, "Reply…", "r"), byKey(iconRename, "Rename…", "R"), separator)
 	closeIt := byKey(iconClose, "Close window…", "X")
 	closeIt.danger = true
 	return append(items, closeIt)
@@ -148,10 +149,7 @@ func (m Model) snoozeMenu() []action {
 		}})
 	}
 	return append(items, separator, action{icon: "c", label: "Other time…", key: "c", hint: " ", run: func(m Model) (tea.Model, tea.Cmd) {
-		m.mode = modeSnoozeCustom
-		m.input.Placeholder = "90m, 2d, 15:04, 2026-12-01 09:00"
-		m.input.SetValue("")
-		return m, m.input.Focus()
+		return m.prompt(modeSnoozeCustom, "")
 	}})
 }
 

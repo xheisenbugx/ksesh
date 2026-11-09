@@ -148,3 +148,16 @@ func TestSendTextAndKeys(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "screen", screen)
 }
+
+func TestSetTitle(t *testing.T) {
+	k, mShell := newAgentKitty(t, "")
+	mShell.EXPECT().CmdCapture("kitten", "@", "set-user-vars", "--match", "id:2", "ksesh_title=Auth rework").Return("", nil).Once()
+	mShell.EXPECT().CmdCapture("kitten", "@", "set-user-vars", "--match", "id:2", "ksesh_title").Return("", nil).Once()
+
+	require.NoError(t, k.SetTitle(2, "Auth rework"))
+	require.NoError(t, k.SetTitle(2, ""), "empty unsets it")
+
+	a, ok := agentOf(lsWindow{ID: 2, Title: "claude", UserVars: map[string]string{StatusVar: "idle", TitleVar: "Auth rework"}})
+	require.True(t, ok)
+	assert.Equal(t, "Auth rework", a.CustomTitle)
+}

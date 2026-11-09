@@ -19,6 +19,7 @@ import (
 type Backend interface {
 	ListAgents() ([]*model.Agent, error)
 	SetThread(windowID int, t model.Thread) error
+	SetTitle(windowID int, title string) error
 	FocusWindow(windowID int) error
 	FocusPlain(windowID int) error
 	LastWorkWindow(windowID int) (int, error)
@@ -60,6 +61,7 @@ const (
 	modeSnooze
 	modeSnoozeCustom
 	modeReply
+	modeRename
 	modeConfirmClose
 	modeHelp
 	// modeMenu is a popup open over the list: a thread's context menu, or
@@ -293,7 +295,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch m.mode {
 		case modeSnooze:
 			return m.keySnooze(msg)
-		case modeSnoozeCustom, modeReply:
+		case modeSnoozeCustom, modeReply, modeRename:
 			return m.keyInput(msg)
 		case modeConfirmClose:
 			return m.keyConfirmClose(msg)
@@ -561,10 +563,11 @@ func (m Model) run(key string) (tea.Model, tea.Cmd) {
 		}
 	case "r":
 		if _, ok := m.selectedAgent(); ok {
-			m.mode = modeReply
-			m.input.Placeholder = "reply, enter sends"
-			m.input.SetValue("")
-			return m, m.input.Focus()
+			return m.prompt(modeReply, "")
+		}
+	case "R":
+		if a, ok := m.selectedAgent(); ok {
+			return m.prompt(modeRename, a.CustomTitle)
 		}
 	case "X":
 		if _, ok := m.selectedAgent(); ok {
@@ -767,46 +770,13 @@ func (m Model) keySnooze(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.mode = modeNormal
 		return m, nil
 	case "c":
-		m.mode = modeSnoozeCustom
-		m.input.Placeholder = "90m, 2d, 15:04, 2026-12-01 09:00"
-		m.input.SetValue("")
-		return m, m.input.Focus()
+		return m.prompt(modeSnoozeCustom, "")
 	}
 	presets := agent.SnoozePresets(m.now)
 	if n, err := strconv.Atoi(key); err == nil && n >= 1 && n <= len(presets) {
 		return m.snooze(presets[n-1].Until)
 	}
 	return m, nil
-}
-
-func (m Model) keyInput(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
-	switch msg.String() {
-	case "esc":
-		m.mode = modeNormal
-		m.input.Blur()
-		return m, nil
-	case "enter":
-		text := m.input.Value()
-		m.input.Blur()
-		if m.mode == modeSnoozeCustom {
-			until, err := agent.ParseSnooze(text, m.now)
-			if err != nil {
-				m.mode = modeNormal
-				m.say(err.Error())
-				return m, nil
-			}
-			return m.snooze(until)
-		}
-		m.mode = modeNormal
-		a, ok := m.selectedAgent()
-		if !ok || text == "" {
-			return m, nil
-		}
-		return m, m.do("sent to "+title(a), nil, func(b Backend) error { return b.SendText(a.WindowID, text, true) })
-	}
-	var cmd tea.Cmd
-	m.input, cmd = m.input.Update(msg)
-	return m, cmd
 }
 
 func (m Model) keyConfirmClose(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
