@@ -3,6 +3,7 @@ package sidebar
 import (
 	"fmt"
 	"image/color"
+	"math"
 	"strings"
 
 	"charm.land/lipgloss/v2"
@@ -59,9 +60,9 @@ func themeFor(bg, fgc color.Color) theme {
 		selectBy, hoverBy = 0.14, 0.06
 	}
 	return theme{
-		muted:    fgSGR(mix(bg, fgc, 0.58)),
-		subtle:   fgSGR(mix(bg, fgc, 0.24)),
-		heading:  fgSGR(mix(bg, fgc, 0.72)),
+		muted:    fgSGR(legible(bg, fgc, 0.58, 4.5)),
+		subtle:   fgSGR(legible(bg, fgc, 0.24, 1.8)),
+		heading:  fgSGR(legible(bg, fgc, 0.72, 6)),
 		accent:   fgSGR(accent),
 		selected: bgSGR(mix(bg, accent, selectBy)),
 		hover:    bgSGR(mix(bg, fgc, hoverBy)),
@@ -71,6 +72,42 @@ func themeFor(bg, fgc color.Color) theme {
 		to:       to,
 		bg:       bg,
 	}
+}
+
+// legible is fg mixed t of the way from bg, or further toward fg if that
+// isn't enough to read it against bg: a contrast of at least want, or as much
+// as fg itself has. Mixed text fades faster on light backgrounds, and on
+// low-contrast schemes like Solarized, than on dark ones.
+func legible(bg, fg color.Color, t, want float64) color.Color {
+	want = min(want, contrast(fg, bg))
+	c := mix(bg, fg, t)
+	for t < 1 && contrast(c, bg) < want {
+		t = min(t+0.02, 1)
+		c = mix(bg, fg, t)
+	}
+	return c
+}
+
+// contrast is the WCAG contrast ratio of two colors, from 1 to 21.
+func contrast(a, b color.Color) float64 {
+	x, y := luminance(a), luminance(b)
+	if x < y {
+		x, y = y, x
+	}
+	return (x + 0.05) / (y + 0.05)
+}
+
+// luminance is a color's WCAG relative luminance.
+func luminance(c color.Color) float64 {
+	r, g, b, _ := c.RGBA()
+	lin := func(v uint32) float64 {
+		x := float64(v>>8) / 255
+		if x <= 0.03928 {
+			return x / 12.92
+		}
+		return math.Pow((x+0.055)/1.055, 2.4)
+	}
+	return 0.2126*lin(r) + 0.7152*lin(g) + 0.0722*lin(b)
 }
 
 func isDark(c color.Color) bool {
