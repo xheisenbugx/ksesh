@@ -26,6 +26,7 @@ const (
 	iconSettle = "" // archive
 	iconDone   = "" // check in a circle
 	iconRobot  = "" // robot
+	iconClosed = "" // history: a closed thread, to resume
 )
 
 // here marks the thread you're on, and the closed shelf hiding it.
@@ -170,7 +171,13 @@ func (m Model) title() []string {
 	}
 	left := " " + m.th.mute(scope)
 	if m.loaded {
-		left += m.th.dim(" · ") + m.th.mute(strconv.Itoa(len(m.agents)))
+		live := 0
+		for _, a := range m.agents {
+			if !a.Closed {
+				live++
+			}
+		}
+		left += m.th.dim(" · ") + m.th.mute(strconv.Itoa(live))
 	}
 	var right []string
 	switch {
@@ -307,8 +314,11 @@ func (m Model) renderHeader(r row, bg string) string {
 }
 
 func badgeIcon(badge agent.Badge) (string, int) {
-	if badge == agent.BadgeWoke {
+	switch badge {
+	case agent.BadgeWoke:
 		return iconClock, ansicolor.Magenta
+	case agent.BadgeClosed:
+		return iconClosed, 0
 	}
 	if g, ok := agent.GlyphFor(agent.Status(badge)); ok {
 		return g.Icon, g.ColorCode
@@ -343,7 +353,7 @@ func (m Model) renderThread(r row, bg string) []string {
 	}
 
 	dot := " "
-	if a.WindowID == m.current {
+	if !a.Closed && a.WindowID == m.current {
 		dot = m.th.accented(here)
 	}
 	bar := m.bar(r)
@@ -381,6 +391,13 @@ func (m Model) subtitle(a *model.Agent, section agent.Section, badge agent.Badge
 	switch {
 	case section == agent.Snoozed:
 		what = "until " + when(a.Thread.SnoozedUntil, m.now)
+	case a.Closed:
+		what = "closed"
+		if a.Message != "" {
+			what += " · " + a.Message
+		} else if a.Prompt != "" {
+			what += " · › " + a.Prompt
+		}
 	case section == agent.Settled:
 		what = "settled"
 		if a.Message != "" {
@@ -509,6 +526,8 @@ func (m Model) hints() []hint {
 	}
 	a := r.agent
 	switch {
+	case a.Closed:
+		return []hint{{"↵", "resume"}, {"X", "forget"}, {"?", "keys"}}
 	case r.section == agent.Snoozed:
 		return []hint{{"↵", "go"}, {"w", "wake"}, {"u", "undo"}, {"?", "keys"}}
 	case r.section == agent.Settled:
@@ -571,7 +590,11 @@ func (m Model) footer() []string {
 	case modeMenu:
 		return append(lines, m.hintLine([]hint{{"↵", "pick"}, {"j k", "move"}, {"esc", "close"}}))
 	case modeConfirmClose:
-		return append(lines, line(" "+fg(ansicolor.Red, "Close the agent's window?")+" "+m.key("y")+m.th.mute("/n")))
+		ask := "Close the agent's window?"
+		if a, ok := m.selectedAgent(); ok && a.Closed {
+			ask = "Forget the closed thread?"
+		}
+		return append(lines, line(" "+fg(ansicolor.Red, ask)+" "+m.key("y")+m.th.mute("/n")))
 	}
 	if m.flash != "" && m.opts.Now().Before(m.until) {
 		return append(lines, line(" "+fg(ansicolor.Green, "✓")+" "+m.flash))
@@ -593,7 +616,7 @@ func (m Model) helpLines() []string {
 	}
 	return []string{
 		section("Threads"),
-		entry("↵ l", "go to the thread"),
+		entry("↵ l", "go to, or resume, a thread"),
 		entry("esc h", "back to your window"),
 		entry("j k g G", "move"),
 		entry("tab", "next section"),
@@ -610,7 +633,7 @@ func (m Model) helpLines() []string {
 		entry("a", "approve"),
 		entry("x", "deny, interrupt"),
 		entry("r", "reply"),
-		entry("X", "close its window"),
+		entry("X", "close its window, forget"),
 		"",
 		section("Sidebar"),
 		entry("f", "this session, all"),

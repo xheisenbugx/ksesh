@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"strings"
 	"unicode/utf8"
+
+	"github.com/xheisenbugx/ksesh/model"
 )
 
 // Update is what one hook event changes on the agent's window. Message and
@@ -22,12 +24,30 @@ type Update struct {
 	StartTurn bool
 	// Clear drops every agent variable: the agent is gone.
 	Clear bool
+	// Start marks the agent's session starting: a new conversation, or one
+	// resumed, in the window.
+	Start bool
+
+	// Conversation is the agent's id for the conversation (Claude Code's
+	// session_id), which resumes it; Cwd is where it runs and Transcript
+	// where it is written. Only agents that report one are kept in the
+	// thread history, and can be resumed.
+	Conversation string
+	Cwd          string
+	Transcript   string
+	// Carry is the triage state the thread history has for the
+	// conversation, given to the window when the conversation first shows
+	// up in it: the thread was resumed there.
+	Carry *model.Thread
 }
 
 // claudeHookInput is the subset of a Claude Code hook's stdin ksesh reads.
 // See https://code.claude.com/docs/en/hooks.
 type claudeHookInput struct {
 	HookEventName        string `json:"hook_event_name"`
+	SessionID            string `json:"session_id"`
+	TranscriptPath       string `json:"transcript_path"`
+	Cwd                  string `json:"cwd"`
 	AgentID              string `json:"agent_id"`
 	Prompt               string `json:"prompt"`
 	Message              string `json:"message"`
@@ -70,11 +90,12 @@ func FromClaudeHook(raw []byte) (Update, bool) {
 	if in.AgentID != "" {
 		return Update{}, false
 	}
-	u := Update{Agent: "claude"}
+	u := Update{Agent: "claude", Conversation: in.SessionID, Cwd: in.Cwd, Transcript: in.TranscriptPath}
 	switch in.HookEventName {
 	case "SessionStart":
 		u.Status = Idle
 		u.SetMessage, u.SetPrompt = true, true
+		u.Start = true
 	case "UserPromptSubmit":
 		u.Status = Working
 		u.Prompt, u.SetPrompt = Summarize(in.Prompt), true
@@ -110,6 +131,24 @@ func FromClaudeHook(raw []byte) (Update, bool) {
 		return Update{}, false
 	}
 	return u, true
+}
+
+// ResumeCommand is the shell command that resumes an agent's conversation,
+// run in the directory it ran in. ok is false for an agent ksesh doesn't
+// know how to resume.
+func ResumeCommand(agentName, conversation string) (string, bool) {
+	if conversation == "" {
+		return "", false
+	}
+	switch agentName {
+	case "claude":
+		return "claude --resume " + shellQuote(conversation), true
+	case "codex":
+		return "codex resume " + shellQuote(conversation), true
+	case "gemini":
+		return "gemini --resume " + shellQuote(conversation), true
+	}
+	return "", false
 }
 
 // permissionMessage says what a permission prompt would allow, e.g. "Allow

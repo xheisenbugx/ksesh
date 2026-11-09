@@ -81,7 +81,7 @@ func TestFromClaudeHook(t *testing.T) {
 		{
 			name:  "a session start registers the agent as idle",
 			input: `{"hook_event_name":"SessionStart","source":"startup"}`,
-			want:  Update{Agent: "claude", Status: Idle, SetMessage: true, SetPrompt: true},
+			want:  Update{Agent: "claude", Status: Idle, SetMessage: true, SetPrompt: true, Start: true},
 			ok:    true,
 		},
 		{
@@ -108,6 +108,21 @@ func TestFromClaudeHook(t *testing.T) {
 			got, ok := FromClaudeHook([]byte(tt.input))
 			assert.Equal(t, tt.ok, ok)
 			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
+func TestFromClaudeHookCapturesTheConversation(t *testing.T) {
+	ids := `"session_id":"0b5e-41","transcript_path":"/home/me/.claude/projects/x/0b5e-41.jsonl","cwd":"/c/api"`
+	for _, event := range []string{"SessionStart", "UserPromptSubmit", "PostToolUse", "PermissionRequest", "Stop", "StopFailure", "SessionEnd"} {
+		t.Run(event, func(t *testing.T) {
+			got, ok := FromClaudeHook([]byte(`{"hook_event_name":"` + event + `",` + ids + `}`))
+			assert.True(t, ok)
+			assert.Equal(t, "0b5e-41", got.Conversation, "every event names the conversation")
+			assert.Equal(t, "/c/api", got.Cwd)
+			assert.Equal(t, "/home/me/.claude/projects/x/0b5e-41.jsonl", got.Transcript)
+			assert.Equal(t, event == "SessionStart", got.Start)
+			assert.Nil(t, got.Carry, "the thread history's state is the caller's to add")
 		})
 	}
 }

@@ -1,6 +1,7 @@
 package kitty
 
 import (
+	"cmp"
 	"encoding/json"
 	"fmt"
 	"slices"
@@ -20,6 +21,9 @@ const (
 	MsgVar      = "ksesh_msg"
 	PromptVar   = "ksesh_prompt"
 	TurnAtVar   = "ksesh_turn_at"
+	// ConvVar is the agent's conversation id (Claude Code's session_id),
+	// which ties the window to its record in the thread history.
+	ConvVar = "ksesh_conv"
 
 	// Thread triage (see agent/thread.go). Times are unix seconds.
 	PinVar         = "ksesh_pin"
@@ -97,26 +101,26 @@ func (k *RealKitty) SetThread(windowID int, t model.Thread) error {
 	return err
 }
 
-// windowVars reads one window's user variables.
-func (k *RealKitty) windowVars(windowID int) (map[string]string, error) {
+// window reads one window.
+func (k *RealKitty) window(windowID int) (lsWindow, error) {
 	out, err := k.rc("ls", "--match", "id:"+strconv.Itoa(windowID))
 	if err != nil {
-		return nil, err
+		return lsWindow{}, err
 	}
 	var osWindows []lsOSWindow
 	if err := json.Unmarshal([]byte(out), &osWindows); err != nil {
-		return nil, fmt.Errorf("couldn't parse kitten @ ls output: %w", err)
+		return lsWindow{}, fmt.Errorf("couldn't parse kitten @ ls output: %w", err)
 	}
 	for _, osw := range osWindows {
 		for _, tab := range osw.Tabs {
 			for _, w := range tab.Windows {
 				if w.ID == windowID {
-					return w.UserVars, nil
+					return w, nil
 				}
 			}
 		}
 	}
-	return nil, fmt.Errorf("no kitty window %d", windowID)
+	return lsWindow{}, fmt.Errorf("no kitty window %d", windowID)
 }
 
 // agentPrograms are the agents recognized by the program running in a window,
@@ -126,12 +130,31 @@ var agentPrograms = []string{"claude", "codex", "gemini", "opencode", "aider", "
 // SetAgentStatus writes an agent's status onto a window. Without a window id
 // it is the window ksesh runs in, which is where an agent's hooks run.
 func (k *RealKitty) SetAgentStatus(windowID int, u agent.Update) error {
+	_, err := k.UpdateAgent(windowID, u)
+	return err
+}
+
+// readsWindow reports whether an update has to read the window first. What
+// the agent does moves its thread: a new prompt un-settles and wakes it,
+// needing you wakes it early. And for the thread history, a conversation
+// starting, ending or finishing a turn is when its window's title, session
+// and thread are worth keeping; and when a resumed one takes on its thread.
+// Only those pay for the read, once a turn rather than once a tool call.
+func readsWindow(u agent.Update) bool {
+	if u.StartTurn || (!u.Clear && (u.Status == agent.Waiting || u.Status == agent.Error)) {
+		return true
+	}
+	return u.Conversation != "" && (u.Start || u.Clear || u.Status == agent.Done)
+}
+
+func (k *RealKitty) UpdateAgent(windowID int, u agent.Update) (*model.Agent, error) {
 	if windowID == 0 {
 		windowID = k.selfWindowID()
 	}
 	if windowID == 0 {
-		return fmt.Errorf("not inside a kitty window")
+		return nil, fmt.Errorf("not inside a kitty window")
 	}
+	var seen *model.Agent
 	var assignments []string
 	set := func(name, value string) {
 		if value == "" {
@@ -140,23 +163,39 @@ func (k *RealKitty) SetAgentStatus(windowID int, u agent.Update) error {
 			assignments = append(assignments, name+"="+value)
 		}
 	}
+	if readsWindow(u) {
+		w, err := k.window(windowID)
+		if err != nil {
+			return nil, err
+		}
+		old := threadOf(w.UserVars)
+		t := old
+		// A conversation new to the window: one resumed there takes on the
+		// thread it had, one that replaced another in it starts afresh.
+		if conv := w.UserVars[ConvVar]; u.Conversation != "" && conv != u.Conversation {
+			switch {
+			case u.Carry != nil:
+				t = *u.Carry
+			case conv != "":
+				t = model.Thread{}
+			}
+		}
+		seen = &model.Agent{WindowID: w.ID, Title: w.Title, Path: w.dir(), Session: cmp.Or(w.UserVars[NameVar], w.SessionName), Thread: t}
+		if !u.Clear {
+			t = agent.OnActivity(t, u, time.Now())
+			seen.Thread = t
+			if t != old {
+				assignments = append(assignments, threadAssignments(t)...)
+			}
+		}
+	}
 	if u.Clear {
-		for _, name := range append([]string{AgentVar, StatusVar, StatusAtVar, MsgVar, PromptVar, TurnAtVar}, threadVars...) {
+		for _, name := range append([]string{AgentVar, StatusVar, StatusAtVar, MsgVar, PromptVar, TurnAtVar, ConvVar}, threadVars...) {
 			set(name, "")
 		}
 	} else {
-		// What the agent does moves its thread: a new prompt un-settles and
-		// wakes it, needing you wakes it early. Only those events can, so only
-		// they pay for reading the window first.
-		if u.StartTurn || u.Status == agent.Waiting || u.Status == agent.Error {
-			vars, err := k.windowVars(windowID)
-			if err != nil {
-				return err
-			}
-			old := threadOf(vars)
-			if t := agent.OnActivity(old, u, time.Now()); t != old {
-				assignments = append(assignments, threadAssignments(t)...)
-			}
+		if u.Conversation != "" {
+			set(ConvVar, u.Conversation)
 		}
 		if u.Agent != "" {
 			set(AgentVar, u.Agent)
@@ -179,7 +218,7 @@ func (k *RealKitty) SetAgentStatus(windowID int, u agent.Update) error {
 	}
 	args := append([]string{"set-user-vars", "--match", "id:" + strconv.Itoa(windowID)}, assignments...)
 	_, err := k.mutate(args...)
-	return err
+	return seen, err
 }
 
 // ListAgents lists the agents in every kitty window: those reporting through
@@ -239,6 +278,7 @@ func agentOf(w lsWindow) (*model.Agent, bool) {
 		return a, true
 	}
 	a.Name = w.UserVars[AgentVar]
+	a.Conversation = w.UserVars[ConvVar]
 	a.Status = status
 	a.Message = w.UserVars[MsgVar]
 	a.Prompt = w.UserVars[PromptVar]

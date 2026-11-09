@@ -94,7 +94,20 @@ func TestFromGeminiHook(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			got, ok := FromGeminiHook([]byte(tt.input))
 			assert.Equal(t, tt.ok, ok)
+			// The conversation has tests of its own.
+			got.Conversation, got.Cwd, got.Transcript = "", "", ""
+			if !tt.want.Start {
+				got.Start = false
+			}
 			assert.Equal(t, tt.want, got)
 		})
 	}
+}
+
+func TestGeminiHookNamesTheConversation(t *testing.T) {
+	u, ok := FromGeminiHook([]byte(`{"hook_event_name":"SessionStart","session_id":"5f2c","cwd":"/c/web","transcript_path":"/g.json"}`))
+	assert.True(t, ok)
+	assert.True(t, u.Start)
+	assert.Equal(t, "5f2c", u.Conversation)
+	assert.Equal(t, "/c/web", u.Cwd)
 }

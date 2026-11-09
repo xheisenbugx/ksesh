@@ -145,6 +145,11 @@ func TestFromCodexHook(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			got, ok := FromCodexHook([]byte(tt.input))
 			assert.Equal(t, tt.ok, ok)
+			// The conversation has tests of its own.
+			got.Conversation, got.Cwd, got.Transcript = "", "", ""
+			if !tt.want.Start {
+				got.Start = false
+			}
 			assert.Equal(t, tt.want, got)
 		})
 	}
@@ -163,4 +168,20 @@ func TestFromHookDispatchesByAgent(t *testing.T) {
 	assert.False(t, ok, "Gemini has no Stop event")
 	_, ok = FromHook("aider", stop)
 	assert.False(t, ok)
+}
+
+func TestCodexHookNamesTheConversation(t *testing.T) {
+	u, ok := FromCodexHook([]byte(`{"hook_event_name":"UserPromptSubmit","session_id":"019a","cwd":"/c/api","transcript_path":"/t.jsonl","prompt":"go"}`))
+	assert.True(t, ok)
+	assert.Equal(t, "019a", u.Conversation)
+	assert.Equal(t, "/c/api", u.Cwd)
+	assert.Equal(t, "/t.jsonl", u.Transcript)
+
+	// A subagent's approval is shown, but doesn't move the window to its
+	// conversation; nor does SessionStart, which subagents fire too.
+	u, ok = FromCodexHook([]byte(`{"hook_event_name":"PermissionRequest","agent_id":"sub","session_id":"sub-1","tool_name":"shell","tool_input":{"command":["ls"]}}`))
+	assert.True(t, ok)
+	assert.Empty(t, u.Conversation)
+	u, _ = FromCodexHook([]byte(`{"hook_event_name":"SessionStart","source":"startup","session_id":"019a"}`))
+	assert.Empty(t, u.Conversation)
 }

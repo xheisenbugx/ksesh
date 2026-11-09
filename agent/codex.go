@@ -12,6 +12,9 @@ import (
 // `notify` program gets as its last argument, whose keys are kebab-case.
 type codexHookInput struct {
 	HookEventName        string          `json:"hook_event_name"`
+	SessionID            string          `json:"session_id"`
+	Cwd                  string          `json:"cwd"`
+	TranscriptPath       string          `json:"transcript_path"`
 	AgentID              string          `json:"agent_id"`
 	Source               string          `json:"source"`
 	Prompt               string          `json:"prompt"`
@@ -44,6 +47,13 @@ func FromCodexHook(raw []byte) (Update, bool) {
 		return Update{}, false
 	}
 	u := Update{Agent: "codex"}
+	// The conversation, for the thread history and 'codex resume'. Not from
+	// a subagent's events, nor from SessionStart, which Codex also fires for
+	// subagents without saying so: either would move the window to the
+	// subagent's conversation.
+	if in.AgentID == "" && in.HookEventName != "SessionStart" {
+		u.Conversation, u.Cwd, u.Transcript = in.SessionID, in.Cwd, in.TranscriptPath
+	}
 	switch in.HookEventName {
 	case "SessionStart":
 		// Compaction restarts the session in the middle of a turn.

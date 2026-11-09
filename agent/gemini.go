@@ -9,6 +9,9 @@ import (
 // https://geminicli.com/docs/hooks/reference/.
 type geminiHookInput struct {
 	HookEventName    string `json:"hook_event_name"`
+	SessionID        string `json:"session_id"`
+	Cwd              string `json:"cwd"`
+	TranscriptPath   string `json:"transcript_path"`
 	Prompt           string `json:"prompt"`
 	PromptResponse   string `json:"prompt_response"`
 	NotificationType string `json:"notification_type"`
@@ -37,9 +40,10 @@ func FromGeminiHook(raw []byte) (Update, bool) {
 	if err := json.Unmarshal(raw, &in); err != nil {
 		return Update{}, false
 	}
-	u := Update{Agent: "gemini"}
+	u := Update{Agent: "gemini", Conversation: in.SessionID, Cwd: in.Cwd, Transcript: in.TranscriptPath}
 	switch in.HookEventName {
 	case "SessionStart":
+		u.Start = true
 		u.Status = Idle
 		u.SetMessage, u.SetPrompt = true, true
 	case "BeforeAgent":

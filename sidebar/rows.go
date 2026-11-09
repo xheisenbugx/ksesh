@@ -99,7 +99,7 @@ func layout(board agent.Board, expanded map[agent.Section]bool, allSettled bool,
 		header := row{kind: rowHeader, section: s, count: len(threads)}
 		if !expanded[s] {
 			for _, a := range threads {
-				header.holdsCurrent = header.holdsCurrent || a.WindowID == currentID
+				header.holdsCurrent = header.holdsCurrent || (currentID != 0 && a.WindowID == currentID)
 			}
 			tray = append(tray, header)
 			continue

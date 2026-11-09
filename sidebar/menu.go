@@ -23,6 +23,8 @@ const (
 	iconClose     = "" // window close
 	iconUp        = "" // arrow up
 	iconDown      = "" // arrow down
+	iconResume    = "" // play
+	iconForget    = "" // trash
 )
 
 // action is something to do to a thread, from its menu or one of its
@@ -80,7 +82,22 @@ func (p popup) itemAt(x, y int) (int, bool) {
 //	├──────────────────────┤
 //	│  Close window…    X │
 //	╰──────────────────────╯
+//
+// A closed thread can only be resumed or forgotten:
+//
+//	╭──────────────────────╮
+//	│  Resume           ↵ │
+//	├──────────────────────┤
+//	│  Forget…          X │
+//	╰──────────────────────╯
 func (m Model) threadMenu(a *model.Agent) []action {
+	if a.Closed {
+		resume := byKey(iconResume, "Resume", "enter")
+		resume.hint = "↵"
+		forget := byKey(iconForget, "Forget…", "X")
+		forget.danger = true
+		return []action{resume, separator, forget}
+	}
 	section := agent.SectionOf(a, m.now, m.opts.ThreadOpts)
 	status := agent.Status(a.Status)
 	items := []action{byKey(iconGo, "Go to thread", "enter")}
@@ -291,6 +308,9 @@ func (m Model) buttons(r row) []action {
 		return nil
 	}
 	a := r.agent
+	if a.Closed {
+		return []action{byKey(iconResume, "resume", "enter")}
+	}
 	settle := byKey(iconSettle, "settle", "s")
 	switch r.section {
 	case agent.Snoozed:

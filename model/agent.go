@@ -32,6 +32,13 @@ type Agent struct {
 	LastFocused float64 `json:"-"`
 	// Thread is what you decided about the agent: pinned, snoozed, settled.
 	Thread Thread `json:"thread,omitzero"`
+	// Conversation is the agent's own id for the conversation it is in
+	// (Claude Code's session_id), which resumes it. Empty for agents that
+	// don't report one.
+	Conversation string `json:"conversation,omitempty"`
+	// Closed marks a thread whose window is gone, kept from the thread
+	// history so it can be resumed. A closed thread has no WindowID.
+	Closed bool `json:"closed,omitempty"`
 }
 
 // Thread is the triage state of an agent, the way a thread is triaged in an

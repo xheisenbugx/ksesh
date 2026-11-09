@@ -36,6 +36,7 @@ import (
 	"github.com/xheisenbugx/ksesh/sessionfile"
 	"github.com/xheisenbugx/ksesh/shell"
 	"github.com/xheisenbugx/ksesh/startup"
+	"github.com/xheisenbugx/ksesh/threads"
 	"github.com/xheisenbugx/ksesh/worktree"
 	"github.com/xheisenbugx/ksesh/zoxide"
 )
@@ -74,6 +75,9 @@ type Deps struct {
 	Worktree      worktree.Worktree
 	Browser       browser.Browser
 	Mkdirer       mkdirer.Mkdirer
+	// Threads is kitty with the thread history, for what shows closed
+	// threads: the sidebar.
+	Threads *threads.Kitty
 }
 
 // NewBaseDeps constructs all config-free dependencies.
@@ -157,6 +161,9 @@ func (b *BaseDeps) BuildAll(configPath string) (*Deps, error) {
 	}
 	pk := picker.NewPicker(config, p, b.Home, usedLister, b.Zoxide, t, refreshCache)
 	mk := mkdirer.NewMkdirer(b.Os, b.Home, c)
+	// No home to keep the thread history in is no history, not an error.
+	historyDir, _ := threads.DefaultDir()
+	th := threads.NewKitty(t, threads.NewStore(historyDir), n, threads.RetentionOf(config.Sidebar))
 
 	return &Deps{
 		BaseDeps:      *b,
@@ -174,6 +181,7 @@ func (b *BaseDeps) BuildAll(configPath string) (*Deps, error) {
 		Worktree:      wt,
 		Browser:       br,
 		Mkdirer:       mk,
+		Threads:       th,
 	}, nil
 }
 

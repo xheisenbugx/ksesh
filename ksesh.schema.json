@@ -265,6 +265,18 @@
           "minimum": 0,
           "default": 7,
           "description": "Settle threads that haven't done anything for this many days. 0 never settles one on its own."
+        },
+        "keep_closed": {
+          "type": "integer",
+          "minimum": 0,
+          "default": 200,
+          "description": "How many closed threads (agents whose window is gone) to keep in the Settled shelf to resume. 0 keeps none."
+        },
+        "keep_closed_days": {
+          "type": "integer",
+          "minimum": 0,
+          "default": 30,
+          "description": "Forget closed threads that haven't done anything for this many days. 0 never forgets one for its age."
         }
       },
       "additionalProperties": false

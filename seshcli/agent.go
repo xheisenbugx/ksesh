@@ -16,6 +16,7 @@ import (
 	"github.com/xheisenbugx/ksesh/agent"
 	"github.com/xheisenbugx/ksesh/kitty"
 	"github.com/xheisenbugx/ksesh/model"
+	"github.com/xheisenbugx/ksesh/threads"
 )
 
 func NewAgentCommand(base *BaseDeps) *cobra.Command {
@@ -47,6 +48,7 @@ with contrib/ksesh_agents.py, in kitty's tab bar and desktop notifications.`,
 		newAgentUninstallCommand(),
 	)
 	cmd.AddCommand(newThreadCommands(base)...)
+	cmd.AddCommand(newThreadHistoryCommands(base)...)
 	return cmd
 }
 
@@ -55,7 +57,9 @@ func newAgentHookCommand(base *BaseDeps) *cobra.Command {
 		Use:   "hook [json]",
 		Short: "Record a coding agent's hook event (reads the hook's JSON on stdin)",
 		Long: `Record a hook event of Claude Code, Codex (--agent codex) or Gemini CLI
-(--agent gemini) on the kitty window the agent runs in.
+(--agent gemini) on the kitty window the agent runs in, and in the thread
+history under the conversation's id, so the thread can be resumed once its
+window is gone (see 'ksesh agent resume').
 
 It reads the hook's JSON from stdin, or from its argument as Codex's notify
 passes it, never prints anything (the agent would read it as context) and
@@ -79,14 +83,42 @@ control over the tty would write into the agent's own terminal.`,
 			if !ok {
 				return nil
 			}
-			if err := quietKitty(cmd, base).SetAgentStatus(0, update); err != nil {
-				slog.Debug("agent hook", "error", err)
+			var store *threads.Store
+			if update.Conversation != "" {
+				if dir, err := threads.DefaultDir(); err == nil {
+					store = threads.NewStore(dir)
+				}
 			}
+			recordHook(quietKitty(cmd, base), store, update, time.Now())
 			return nil
 		},
 	}
 	cmd.Flags().String("agent", "claude", "whose hook it is: "+strings.Join(agent.HookAgents, ", "))
 	return cmd
+}
+
+// recordHook writes a hook event onto the agent's window and, for an agent
+// that names its conversation, into the thread history. A conversation the
+// history knows that shows up in a new window was resumed there: the window
+// takes on its thread, back out of Settled. The history is written even when
+// kitty can't be reached: kitty quitting is how many threads close.
+func recordHook(k kitty.Kitty, store *threads.Store, u agent.Update, now time.Time) {
+	if store != nil {
+		if rec, ok := store.Get(u.Conversation); ok {
+			carry := agent.Resume(rec.Thread)
+			u.Carry = &carry
+		}
+	}
+	seen, err := k.UpdateAgent(0, u)
+	if err != nil {
+		slog.Debug("agent hook", "error", err)
+	}
+	if store == nil {
+		return
+	}
+	if err := store.Update(u.Conversation, func(r *model.ThreadRecord) { threads.Record(r, u, seen, now) }); err != nil {
+		slog.Debug("agent hook: thread history", "error", err)
+	}
 }
 
 // quietKitty builds the kitty client without buildDeps, which prints config
