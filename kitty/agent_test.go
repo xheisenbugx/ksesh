@@ -3,6 +3,7 @@ package kitty
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -115,10 +116,96 @@ func TestSetAgentStatusStartsATurn(t *testing.T) {
 func TestSetAgentStatusClears(t *testing.T) {
 	k, mShell := newAgentKitty(t, "7")
 	mShell.EXPECT().CmdCapture("kitten", "@", "set-user-vars", "--match", "id:3",
-		"ksesh_agent", "ksesh_status", "ksesh_status_at", "ksesh_msg", "ksesh_prompt", "ksesh_turn_at",
+		"ksesh_agent", "ksesh_status", "ksesh_status_at", "ksesh_msg", "ksesh_prompt", "ksesh_turn_at", "ksesh_conv",
 		"ksesh_pin", "ksesh_snooze_until", "ksesh_snoozed_at", "ksesh_settled_at", "ksesh_unsettled", "ksesh_woke").Return("", nil)
 
 	require.NoError(t, k.SetAgentStatus(3, agent.Update{Clear: true}))
+}
+
+func TestUpdateAgentRecordsTheConversation(t *testing.T) {
+	k, mShell := newAgentKitty(t, "7")
+	statusAt := mock.MatchedBy(func(s string) bool { return strings.HasPrefix(s, "ksesh_status_at=") })
+	mShell.EXPECT().CmdCapture("kitten", "@", "set-user-vars", "--match", "id:7",
+		"ksesh_conv=abc", "ksesh_agent=claude", statusAt, "ksesh_status=working").Return("", nil)
+
+	seen, err := k.UpdateAgent(0, agent.Update{Agent: "claude", Status: agent.Working, Conversation: "abc"})
+
+	require.NoError(t, err)
+	assert.Nil(t, seen, "a tool call doesn't pay for reading the window")
+}
+
+func TestUpdateAgentCarriesAResumedThreadOver(t *testing.T) {
+	k, mShell := newAgentKitty(t, "7")
+	statusAt := mock.MatchedBy(func(s string) bool { return strings.HasPrefix(s, "ksesh_status_at=") })
+	mShell.EXPECT().CmdCapture("kitten", "@", "ls", "--match", "id:7").Return(
+		`[{"id":1,"tabs":[{"id":10,"windows":[{"id":7,"title":"✳ Fix the login","session_name":"api-native","cwd":"/c/api",
+		  "user_vars":{"ksesh_name":"api"}}]}]}]`, nil)
+	mShell.EXPECT().CmdCapture("kitten", "@", "set-user-vars", "--match", "id:7",
+		"ksesh_pin=5", "ksesh_snooze_until", "ksesh_snoozed_at", "ksesh_settled_at", "ksesh_unsettled=1", "ksesh_woke",
+		"ksesh_conv=abc", "ksesh_agent=claude", "ksesh_msg", "ksesh_prompt", statusAt, "ksesh_status=idle").Return("", nil)
+
+	carry := model.Thread{Pin: 5, Unsettled: true}
+	seen, err := k.UpdateAgent(0, agent.Update{Agent: "claude", Status: agent.Idle, SetMessage: true, SetPrompt: true,
+		Start: true, Conversation: "abc", Carry: &carry})
+
+	require.NoError(t, err)
+	require.NotNil(t, seen)
+	assert.Equal(t, 7, seen.WindowID)
+	assert.Equal(t, "✳ Fix the login", seen.Title)
+	assert.Equal(t, "api", seen.Session, "the session by its ksesh name")
+	assert.Equal(t, carry, seen.Thread)
+}
+
+func TestUpdateAgentKeepsTheThreadOfItsOwnConversation(t *testing.T) {
+	k, mShell := newAgentKitty(t, "7")
+	mShell.EXPECT().CmdCapture("kitten", "@", "ls", "--match", "id:7").Return(windowLs(`"ksesh_conv":"abc","ksesh_pin":"3"`), nil)
+	mShell.EXPECT().CmdCapture("kitten", "@", "set-user-vars", "--match", "id:7",
+		"ksesh_conv=abc", "ksesh_agent=claude", mock.Anything, "ksesh_status=idle").Return("", nil)
+
+	carry := model.Thread{SettledAt: time.Unix(1, 0)}
+	seen, err := k.UpdateAgent(0, agent.Update{Agent: "claude", Status: agent.Idle, Start: true, Conversation: "abc", Carry: &carry})
+
+	require.NoError(t, err)
+	assert.Equal(t, model.Thread{Pin: 3}, seen.Thread, "compacting restarts the session, not the thread")
+}
+
+func TestUpdateAgentStartsAFreshThreadForANewConversation(t *testing.T) {
+	k, mShell := newAgentKitty(t, "7")
+	mShell.EXPECT().CmdCapture("kitten", "@", "ls", "--match", "id:7").Return(windowLs(`"ksesh_conv":"old","ksesh_pin":"3"`), nil)
+	mShell.EXPECT().CmdCapture("kitten", "@", "set-user-vars", "--match", "id:7",
+		"ksesh_pin", "ksesh_snooze_until", "ksesh_snoozed_at", "ksesh_settled_at", "ksesh_unsettled", "ksesh_woke",
+		"ksesh_conv=new", "ksesh_agent=claude", mock.Anything, "ksesh_status=idle").Return("", nil)
+
+	seen, err := k.UpdateAgent(0, agent.Update{Agent: "claude", Status: agent.Idle, Start: true, Conversation: "new"})
+
+	require.NoError(t, err)
+	assert.Equal(t, model.Thread{}, seen.Thread)
+}
+
+func TestUpdateAgentSeesTheThreadBeforeClearingIt(t *testing.T) {
+	k, mShell := newAgentKitty(t, "7")
+	mShell.EXPECT().CmdCapture("kitten", "@", "ls", "--match", "id:7").Return(windowLs(`"ksesh_conv":"abc","ksesh_settled_at":"1700000000"`), nil)
+	mShell.EXPECT().CmdCapture("kitten", "@", "set-user-vars", "--match", "id:7",
+		"ksesh_agent", "ksesh_status", "ksesh_status_at", "ksesh_msg", "ksesh_prompt", "ksesh_turn_at", "ksesh_conv",
+		"ksesh_pin", "ksesh_snooze_until", "ksesh_snoozed_at", "ksesh_settled_at", "ksesh_unsettled", "ksesh_woke").Return("", nil)
+
+	seen, err := k.UpdateAgent(0, agent.Update{Agent: "claude", Clear: true, Conversation: "abc"})
+
+	require.NoError(t, err)
+	assert.Equal(t, int64(1700000000), seen.Thread.SettledAt.Unix(), "what the thread history keeps of it")
+}
+
+func TestListAgentsReadsTheConversation(t *testing.T) {
+	k, _ := newAgentKitty(t, "")
+	st, err := parseState(windowLs(`"ksesh_agent":"claude","ksesh_status":"idle","ksesh_conv":"abc"`), 0)
+	require.NoError(t, err)
+	k.state = st
+
+	agents, err := k.ListAgents()
+
+	require.NoError(t, err)
+	require.Len(t, agents, 1)
+	assert.Equal(t, "abc", agents[0].Conversation)
 }
 
 func TestFocusWindowGoesThroughItsSession(t *testing.T) {

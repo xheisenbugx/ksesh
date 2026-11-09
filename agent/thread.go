@@ -24,6 +24,12 @@ package agent
 //
 // and by hand: Pin, Settle, Snooze and Wake. Pinning un-settles and wakes a
 // thread; settling unpins and wakes it.
+//
+// A thread outlives its window when its agent names the conversation (Claude
+// Code does): the thread history (the threads package) keeps it, and once no
+// window has it any more it is a closed thread. A closed thread can't be
+// working or waiting on you, so it is settled, until you resume it in a new
+// window, where it carries on as it was, un-settled: you came back to it.
 
 import (
 	"cmp"
@@ -84,6 +90,14 @@ func LastActivity(a *model.Agent) time.Time {
 // you settled it, or for one settled for inactivity, its last activity.
 func SettledSince(a *model.Agent, now time.Time, opts ThreadOpts) (time.Time, bool) {
 	t := a.Thread
+	if a.Closed {
+		// Since it last did something, or was settled by hand after that.
+		last := LastActivity(a)
+		if t.SettledAt.After(last) {
+			last = t.SettledAt
+		}
+		return last, true
+	}
 	if !t.SettledAt.IsZero() {
 		return t.SettledAt, true
 	}
@@ -104,6 +118,8 @@ func SettledSince(a *model.Agent, now time.Time, opts ThreadOpts) (time.Time, bo
 // SectionOf is the section a thread is in.
 func SectionOf(a *model.Agent, now time.Time, opts ThreadOpts) Section {
 	switch {
+	case a.Closed:
+		return Settled
 	case IsSnoozed(a.Thread, now):
 		return Snoozed
 	case isSettled(a, now, opts):
@@ -131,7 +147,8 @@ type Board map[Section][]*model.Agent
 //	         started waiting on you comes to the top
 //	Working  the latest prompt first
 //	Snoozed  the soonest to wake first
-//	Settled  the most recently settled first
+//	Settled  the most recently settled first, closed threads among them by
+//	         their last activity
 func Arrange(agents []*model.Agent, now time.Time, opts ThreadOpts) Board {
 	board := Board{}
 	for _, a := range agents {
@@ -144,7 +161,7 @@ func Arrange(agents []*model.Agent, now time.Time, opts ThreadOpts) Board {
 			if newestFirst {
 				c = -c
 			}
-			return cmp.Or(c, cmp.Compare(a.WindowID, b.WindowID))
+			return cmp.Or(c, cmp.Compare(a.WindowID, b.WindowID), strings.Compare(a.Conversation, b.Conversation))
 		}
 	}
 	slices.SortStableFunc(board[Pinned], func(a, b *model.Agent) int {
@@ -206,6 +223,9 @@ func NextPin(agents []*model.Agent, now time.Time) int64 {
 // settled: it isn't done.
 func ToggleSettle(a *model.Agent, now time.Time, opts ThreadOpts) (model.Thread, error) {
 	t := a.Thread
+	if a.Closed {
+		return t, errClosed
+	}
 	if isSettled(a, now, opts) {
 		t.SettledAt = time.Time{}
 		t.Unsettled = true
@@ -227,6 +247,9 @@ func ToggleSettle(a *model.Agent, now time.Time, opts ThreadOpts) (model.Thread,
 // Snooze hides a thread until a time. A settled thread comes out of Settled,
 // to return to the inbox when it wakes; a pinned one stays pinned.
 func Snooze(a *model.Agent, now time.Time, until time.Time) (model.Thread, error) {
+	if a.Closed {
+		return a.Thread, errClosed
+	}
 	if !until.After(now) {
 		return a.Thread, fmt.Errorf("can't snooze until %s, it has passed", until.Format("Mon 15:04"))
 	}
@@ -265,15 +288,86 @@ func OnActivity(t model.Thread, u Update, now time.Time) model.Thread {
 	return t
 }
 
+var errClosed = fmt.Errorf("the thread is closed: resume it first")
+
+// Resume is a thread's triage state as it comes back in a new window: out of
+// Settled and any snooze, since you resumed it to work on it, and still
+// pinned if it was.
+func Resume(t model.Thread) model.Thread {
+	t.Unsettled = t.Unsettled || !t.SettledAt.IsZero()
+	t.SettledAt = time.Time{}
+	t.SnoozedUntil, t.SnoozedAt, t.Woke = time.Time{}, time.Time{}, false
+	return t
+}
+
+// WithClosed adds the closed threads to the live ones: every record of the
+// thread history whose conversation no window has.
+func WithClosed(live []*model.Agent, records []model.ThreadRecord) []*model.Agent {
+	open := map[string]bool{}
+	for _, a := range live {
+		if a.Conversation != "" {
+			open[a.Conversation] = true
+		}
+	}
+	all := slices.Clone(live)
+	for _, r := range records {
+		if r.Conversation != "" && !open[r.Conversation] {
+			all = append(all, ClosedThread(r))
+		}
+	}
+	return all
+}
+
+// ClosedThread is a thread history record as a thread without a window.
+func ClosedThread(r model.ThreadRecord) *model.Agent {
+	a := &model.Agent{
+		Title:        r.Title,
+		Session:      r.Session,
+		Path:         r.Cwd,
+		Name:         r.Agent,
+		Status:       r.Status,
+		Message:      r.Message,
+		Prompt:       r.Prompt,
+		Thread:       r.Thread,
+		Conversation: r.Conversation,
+		Closed:       true,
+	}
+	if since := cmp.Or(r.StatusAt, r.UpdatedAt); !since.IsZero() {
+		a.Since = &since
+	}
+	if !r.TurnAt.IsZero() {
+		turn := r.TurnAt
+		a.TurnAt = &turn
+	}
+	return a
+}
+
+// ThreadTitle is a window title worth keeping as a thread's: the title
+// cleaned of the agent's status glyph, unless it only names the agent.
+func ThreadTitle(title, agentName string) string {
+	t := CleanTitle(strings.TrimSpace(title))
+	if t == "" || strings.EqualFold(t, agentName) || strings.EqualFold(t, "Claude Code") {
+		return ""
+	}
+	return t
+}
+
 // Badge is the one marker a thread row carries: its status, or that it
 // came back from a snooze.
 type Badge string
 
-const BadgeWoke Badge = "woke"
+const (
+	BadgeWoke Badge = "woke"
+	// BadgeClosed is a thread whose window is gone.
+	BadgeClosed Badge = "closed"
+)
 
 // BadgeOf picks a thread's badge. What blocks the agent beats everything; a
 // thread back from a snooze says so before it says it finished.
 func BadgeOf(a *model.Agent, now time.Time) Badge {
+	if a.Closed {
+		return BadgeClosed
+	}
 	switch s := Status(a.Status); s {
 	case Waiting, Error, Working:
 		return Badge(s)

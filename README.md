@@ -285,14 +285,27 @@ their own, the way they do in T3 Code:
   it, and is refused while the agent is working or waiting on you.
 
 Like the status, all of this lives in user variables on the agent's window
-(`ksesh_pin`, `ksesh_snooze_until`, `ksesh_settled_at`, …), so it lasts as
-long as the window and needs nothing running on the side.
+(`ksesh_pin`, `ksesh_snooze_until`, `ksesh_settled_at`, …), so it needs
+nothing running on the side.
+
+**Threads outlive their windows.** Claude Code names its conversation in every
+hook event, and `ksesh agent hook` keeps a record of each one in
+`~/.local/state/ksesh/threads/<conversation>.json` (`$XDG_STATE_HOME`): where it
+runs, its session, title, last status and its triage state. Close the window,
+exit Claude or quit kitty, and the thread stays in **Settled** as a *closed*
+thread, muted and marked with a history icon, among the settled threads by
+when it last did something. `enter` (or a click, or Resume in its menu)
+resumes it: a new tab in the thread's session, which is started again if it
+is gone, runs `claude --resume <id>` in the directory it ran in. The new window
+is the thread again, still pinned if it was, back out of Settled. `X` forgets
+a closed thread. Agents that don't name their conversation are only threads
+while their window lasts.
 
 In the sidebar:
 
 | key          | does                                                  |
 | ------------ | ----------------------------------------------------- |
-| `enter` `l`  | go to the thread (or open/close a shelf), also a click |
+| `enter` `l`  | go to the thread (or open/close a shelf, resume a closed thread), also a click |
 | `esc` `h`    | back to the window you were in                        |
 | `j` `k` `g` `G` `tab` | move; `tab` jumps to the next shelf          |
 | `p`          | pin or unpin; `K` `J` move a pin up or down            |
@@ -302,7 +315,7 @@ In the sidebar:
 | `u`          | undo the last pin, settle, snooze or wake             |
 | `m`          | the thread's menu, also a right click                 |
 | `a` `x` `r`  | approve, deny or interrupt, reply, without switching  |
-| `X`          | close the agent's window (asks first)                 |
+| `X`          | close the agent's window, or forget a closed thread (asks first) |
 | `f`          | only this tab's session, or every session             |
 | `q`          | hide the sidebar in every tab                         |
 
@@ -335,8 +348,10 @@ ksesh agent pin [window-id]           # toggle
 ksesh agent settle [window-id]        # toggle
 ksesh agent snooze 3h [window-id]     # or evening, tomorrow, next-week, 90m, 15:04…
 ksesh agent wake [window-id]
-ksesh sidebar print [--json]          # the threads by section
+ksesh sidebar print [--json]          # the threads by section, closed ones by conversation id
 ksesh sidebar next / prev             # go down / up the sidebar's order
+ksesh agent resume <conversation>     # resume a closed thread (an id prefix will do)
+ksesh agent forget <conversation>     # drop it from the thread history
 ```
 
 `ksesh agent next` skips snoozed and settled threads, and so do the tab bar's
@@ -378,6 +393,8 @@ Configure it in `ksesh.toml`:
 edge = "left"               # or "right"
 width = "38"                # columns, or a share of the tab: "20%"
 auto_settle_after_days = 7  # 0 never settles a thread on its own
+keep_closed = 200           # closed threads kept to resume; 0 keeps none
+keep_closed_days = 30       # forget closed threads idle this long; 0 never
 ```
 
 The sidebar is a window of its own, so it never counts as one of the session's

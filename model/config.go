@@ -96,6 +96,13 @@ type (
 		// AutoSettleAfterDays settles threads that haven't done anything for
 		// this many days. Unset means 7; 0 never settles one on its own.
 		AutoSettleAfterDays *int `toml:"auto_settle_after_days"`
+		// KeepClosed is how many closed threads (agents whose window is
+		// gone) the thread history keeps to resume. Unset means 200; 0
+		// keeps none.
+		KeepClosed *int `toml:"keep_closed"`
+		// KeepClosedDays forgets closed threads that haven't done anything
+		// for this many days. Unset means 30; 0 never forgets one for age.
+		KeepClosedDays *int `toml:"keep_closed_days"`
 	}
 	Evaluation struct {
 		StrictMode bool `toml:"strict_mode"`

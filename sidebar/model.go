@@ -29,6 +29,11 @@ type Backend interface {
 	CloseWindow(windowID int) error
 	CloseSidebars() error
 	Refresh()
+	// ResumeThread opens a closed thread again, in a new window running its
+	// agent on the same conversation.
+	ResumeThread(conversation string) error
+	// ForgetThread drops a closed thread from the thread history.
+	ForgetThread(conversation string) error
 }
 
 type Options struct {
@@ -331,7 +336,7 @@ func (m Model) spinning() bool {
 		return false
 	}
 	for _, a := range m.agents {
-		if agent.Status(a.Status) == agent.Working {
+		if agent.Status(a.Status) == agent.Working && !a.Closed {
 			return true
 		}
 	}
@@ -392,13 +397,22 @@ func (m Model) selectedAgent() (*model.Agent, bool) {
 func rowKey(r row) string {
 	switch r.kind {
 	case rowThread:
-		return "t" + strconv.Itoa(r.agent.WindowID)
+		return threadKey(r.agent)
 	case rowHeader:
 		return "h" + string(r.section)
 	case rowMore:
 		return "m"
 	}
 	return ""
+}
+
+// threadKey is a thread row's key: its window, or for a closed thread,
+// which has none, its conversation.
+func threadKey(a *model.Agent) string {
+	if a.Closed {
+		return "c" + a.Conversation
+	}
+	return "t" + strconv.Itoa(a.WindowID)
 }
 
 // keepCursor keeps the cursor on its row after a refresh. A thread that
@@ -409,6 +423,14 @@ func (m *Model) keepCursor() {
 	if m.cursor == "" && m.current != 0 {
 		m.cursor = "t" + strconv.Itoa(m.current)
 	}
+	// A closed thread resumed: follow it to its new window.
+	if conv, ok := strings.CutPrefix(m.cursor, "c"); ok {
+		for _, a := range m.agents {
+			if !a.Closed && a.Conversation == conv {
+				m.cursor = threadKey(a)
+			}
+		}
+	}
 	for i, r := range rows {
 		if r.selectable() && rowKey(r) == m.cursor {
 			m.cursorIdx = i
@@ -417,9 +439,9 @@ func (m *Model) keepCursor() {
 		}
 	}
 	// A thread folded away in a closed shelf: stay on the shelf.
-	if id, ok := strings.CutPrefix(m.cursor, "t"); ok {
+	if strings.HasPrefix(m.cursor, "t") || strings.HasPrefix(m.cursor, "c") {
 		for _, a := range m.agents {
-			if strconv.Itoa(a.WindowID) != id {
+			if threadKey(a) != m.cursor {
 				continue
 			}
 			header := "h" + string(agent.SectionOf(a, m.now, m.opts.ThreadOpts))
@@ -502,6 +524,13 @@ func (m Model) keyNormal(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 // run does what a key does. The context menu and the buttons on a thread
 // run their actions through it too, so each is done one way.
 func (m Model) run(key string) (tea.Model, tea.Cmd) {
+	if a, ok := m.selectedAgent(); ok && a.Closed {
+		switch key {
+		case "p", "s", "z", "w", "a", "y", "x", "r", "K", "J", "shift+up", "shift+down":
+			m.say("it's closed: ↵ resumes it")
+			return m, nil
+		}
+	}
 	switch key {
 	case "j", "down", "ctrl+n":
 		m.move(1)
@@ -606,6 +635,10 @@ func (m Model) activate() (tea.Model, tea.Cmd) {
 	}
 	switch r.kind {
 	case rowThread:
+		if a := r.agent; a.Closed {
+			conv := a.Conversation
+			return m, m.do("resuming "+title(a), nil, func(b Backend) error { return b.ResumeThread(conv) })
+		}
 		id := r.agent.WindowID
 		return m, m.do("", nil, func(b Backend) error { return b.FocusWindow(id) })
 	case rowHeader:
@@ -814,6 +847,9 @@ func (m Model) keyConfirmClose(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	a, ok := m.selectedAgent()
 	if msg.String() != "y" || !ok {
 		return m, nil
+	}
+	if a.Closed {
+		return m, m.do("forgot "+title(a), nil, func(b Backend) error { return b.ForgetThread(a.Conversation) })
 	}
 	return m, m.do("closed "+title(a), nil, func(b Backend) error { return b.CloseWindow(a.WindowID) })
 }

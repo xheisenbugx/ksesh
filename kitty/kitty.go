@@ -83,6 +83,10 @@ type Kitty interface {
 	// SetAgentStatus writes an agent's status onto a window, the one ksesh
 	// runs in when windowID is 0.
 	SetAgentStatus(windowID int, u agent.Update) error
+	// UpdateAgent is SetAgentStatus, also returning the window as the update
+	// left it (its title, session and thread) when it had to read it, for
+	// the thread history; nil when it didn't.
+	UpdateAgent(windowID int, u agent.Update) (*model.Agent, error)
 	// ListAgents lists the agents running in kitty windows.
 	ListAgents() ([]*model.Agent, error)
 	// FocusWindow switches to a window, through its session.

@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/signal"
 	"slices"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -56,7 +57,8 @@ func NewSidebarCommand(base *BaseDeps) *cobra.Command {
   (inbox)   everything else, the latest activity first
   Working   agents running that don't need you
   Snoozed   hidden until a time, or until the agent needs you
-  Settled   done with: by hand, or after days without activity
+  Settled   done with: by hand, or after days without activity, and the
+            closed threads, whose window is gone, to resume
 
 It runs in a window docked to the edge of a kitty tab (kitty 0.50+), opened
 with 'ksesh sidebar toggle'. Bind that and 'ksesh sidebar focus' in kitty.conf:
@@ -84,7 +86,7 @@ Needs listen_on in kitty.conf: a TUI can't share its tty with remote control.`,
 			}
 			exe, _ := os.Executable()
 			m := sidebar.New(sidebar.Options{
-				Backend:    deps.Kitty,
+				Backend:    deps.Threads,
 				Self:       self,
 				ThreadOpts: threadOpts(deps.Config),
 				StatePath:  path,
@@ -292,7 +294,7 @@ func newSidebarPrintCommand(base *BaseDeps) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			agents, err := deps.Kitty.ListAgents()
+			agents, err := deps.Threads.ListAgents()
 			if err != nil {
 				return err
 			}
@@ -321,7 +323,7 @@ func newSidebarPrintCommand(base *BaseDeps) *cobra.Command {
 				}
 				fmt.Fprintf(out, "%s (%d)\n", s, len(board[s]))
 				for _, a := range board[s] {
-					fmt.Fprintf(out, "  %d\t%s\t%s\t%s\n", a.WindowID, agent.BadgeOf(a, now), threadLabel(a), threadWhen(a, s, now, opts))
+					fmt.Fprintf(out, "  %s\t%s\t%s\t%s\n", threadID(a), agent.BadgeOf(a, now), threadLabel(a), threadWhen(a, s, now, opts))
 				}
 			}
 			return nil
@@ -329,6 +331,15 @@ func newSidebarPrintCommand(base *BaseDeps) *cobra.Command {
 	}
 	cmd.Flags().BoolP("json", "j", false, "output as json, by section")
 	return cmd
+}
+
+// threadID is how print names a thread: its window, or for a closed one its
+// conversation, which 'ksesh agent resume' takes.
+func threadID(a *model.Agent) string {
+	if a.Closed {
+		return a.Conversation
+	}
+	return strconv.Itoa(a.WindowID)
 }
 
 func threadLabel(a *model.Agent) string {
@@ -344,6 +355,9 @@ func threadWhen(a *model.Agent, s agent.Section, now time.Time, opts agent.Threa
 		return "until " + a.Thread.SnoozedUntil.Format("Mon 15:04")
 	case agent.Settled:
 		at, _ := agent.SettledSince(a, now, opts)
+		if a.Closed {
+			return "closed, last active " + Age(&at, now) + " ago"
+		}
 		return "settled " + Age(&at, now) + " ago"
 	}
 	last := agent.LastActivity(a)
@@ -399,8 +413,85 @@ func newThreadCommand(base *BaseDeps, use, short, long string, change func(deps 
 			if err := deps.Kitty.SetThread(a.WindowID, t); err != nil {
 				return err
 			}
+			if err := deps.Threads.KeepThread(a.Conversation, t); err != nil {
+				return err
+			}
 			fmt.Fprintln(cmd.OutOrStdout(), done, threadLabel(a))
 			return nil
+		},
+	}
+}
+
+// closedThread finds a closed thread by its conversation id, or a prefix
+// of it no other one shares.
+func closedThread(deps *Deps, id string) (*model.Agent, error) {
+	agents, err := deps.Threads.ListAgents()
+	if err != nil {
+		return nil, err
+	}
+	var found []*model.Agent
+	for _, a := range agents {
+		if a.Conversation == id {
+			return a, nil
+		}
+		if a.Closed && id != "" && strings.HasPrefix(a.Conversation, id) {
+			found = append(found, a)
+		}
+	}
+	switch len(found) {
+	case 0:
+		return nil, fmt.Errorf("no closed thread %s (see 'ksesh sidebar print')", id)
+	case 1:
+		return found[0], nil
+	}
+	return nil, fmt.Errorf("%d closed threads start with %s", len(found), id)
+}
+
+func newThreadHistoryCommands(base *BaseDeps) []*cobra.Command {
+	return []*cobra.Command{
+		{
+			Use:   "resume <conversation>",
+			Short: "Resume a closed thread in a new window",
+			Long: `Resume a closed thread, one whose window is gone: a new window in the
+thread's session (started again if it isn't running) runs its agent on the same
+conversation, in the directory it ran in, e.g. 'claude --resume <id>'. The
+window takes on the thread's pin, out of Settled. A thread still open in a
+window is gone to instead.
+
+The conversation is the id 'ksesh sidebar print' lists closed threads by, or a
+prefix of it.`,
+			Args: cobra.ExactArgs(1),
+			RunE: func(cmd *cobra.Command, args []string) error {
+				deps, err := buildDeps(cmd, base)
+				if err != nil {
+					return err
+				}
+				a, err := closedThread(deps, args[0])
+				if err != nil {
+					return err
+				}
+				return deps.Threads.ResumeThread(a.Conversation)
+			},
+		},
+		{
+			Use:   "forget <conversation>",
+			Short: "Drop a closed thread from the thread history",
+			Args:  cobra.ExactArgs(1),
+			RunE: func(cmd *cobra.Command, args []string) error {
+				deps, err := buildDeps(cmd, base)
+				if err != nil {
+					return err
+				}
+				a, err := closedThread(deps, args[0])
+				if err != nil {
+					return err
+				}
+				if err := deps.Threads.ForgetThread(a.Conversation); err != nil {
+					return err
+				}
+				fmt.Fprintln(cmd.OutOrStdout(), "forgot", threadLabel(a))
+				return nil
+			},
 		},
 	}
 }
