@@ -136,18 +136,41 @@ which one needs you and jump straight to it, without tmux.
 
 Each agent reports its status on its own kitty window as user variables
 (`ksesh_status` = `working`, `waiting`, `done`, `error` or `idle`, plus
-`ksesh_msg`, `ksesh_prompt`, `ksesh_status_at` and `ksesh_turn_at`). For Claude
-Code, `ksesh agent install` adds hooks to `~/.claude/settings.json` that run
-`ksesh agent hook` on every event that changes it (prompt submitted → working,
-permission prompt → waiting, stop → done, API failure → error), keeping your
-other hooks. A permission prompt's message says what it would allow (`Allow
-Bash: npm test`, `Allow Edit: src/main.go`), so you can answer it from the
-picker without looking at the agent. Other agents can call `ksesh agent set waiting -m "…"` from their
-own hooks; agents without any (codex, gemini, aider, …) are still listed, as
-idle, by their program.
+`ksesh_msg`, `ksesh_prompt`, `ksesh_status_at` and `ksesh_turn_at`), set by
+`ksesh agent hook` from the agent's own hooks, which `ksesh agent install` adds
+for you, keeping your other settings and hooks (the file it changes is backed
+up next to it, and `ksesh agent uninstall` takes them out again):
+
+| agent       | install                        | working                                    | waiting                     | done               | error                |
+| ----------- | ------------------------------ | ------------------------------------------ | --------------------------- | ------------------ | -------------------- |
+| Claude Code | `ksesh agent install`          | prompt submitted, tool ran                 | permission prompt, question | stop               | API failure          |
+| Codex       | `ksesh agent install --codex`  | prompt submitted, tool ran, model answered | approval request            | stop (or `notify`) | model request failed |
+| Gemini CLI  | `ksesh agent install --gemini` | prompt submitted, tool started             | tool confirmation           | agent finished     | (no event for it)    |
+
+`--all` installs all three. A permission prompt's message says what it would
+allow (`Allow Bash: npm test`, `Allow shell: npm test`, `Allow edit:
+src/main.go`, `Allow network: github.com`), so you can answer it from the
+picker without looking at the agent.
+
+- **Claude Code**: hooks in `~/.claude/settings.json` (or `--settings`).
+- **Codex**: hooks in `~/.codex/hooks.json` (`$CODEX_HOME`, or
+  `--codex-home`), or, when your `config.toml` already defines `[hooks]` of its
+  own, in a marked block at its end, since Codex warns when one folder has both.
+  Codex only runs a hook you trusted: after installing, open `/hooks` in Codex
+  and trust ksesh's (once; reinstalling the same binary keeps them trusted).
+  Your `notify` program is left alone: the hooks report everything it would.
+  On a Codex too old for hooks, set `notify = ["ksesh", "agent", "hook",
+  "--agent", "codex"]` yourself for "done".
+- **Gemini CLI**: hooks in `~/.gemini/settings.json` (or `--gemini-settings`).
+  ksesh can't edit a `settings.json` with comments in it.
+
+Other agents can call `ksesh agent set waiting -m "…"` from their own hooks;
+agents without any (aider, opencode, …) are still listed, as idle, by their
+program.
 
 ```sh
 ksesh agent install          # Claude Code hooks (uninstall removes them)
+ksesh agent install --codex  # or --gemini, or --all
 ksesh agent list             # every agent, the ones that need you first
 ksesh agent list -A          # only waiting, failed or done
 ksesh agent next             # go to the one waiting longest; again for the next
@@ -220,8 +243,9 @@ map super+a       launch --type=overlay --cwd=current ~/.config/kitty/ksesh-agen
 kitty reads `tab_bar.py` and watchers once and keeps them until it quits.
 `kitten @ kitten ksesh_reload.py` loads new ones into the running kitty, so
 your sessions don't have to go. `ksesh_agents.py` and `ksesh_snapshot.py`
-themselves are re-read whenever they change. The hooks need `listen_on`: without a socket they do nothing rather
-than talk to kitty over Claude's own terminal.
+themselves are re-read whenever they change. The hooks need `listen_on`:
+without a socket they do nothing rather than talk to kitty over the agent's own
+terminal.
 
 ## Threads and the sidebar
 

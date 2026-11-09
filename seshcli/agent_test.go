@@ -19,9 +19,10 @@ func TestAgentInstallKeepsEveryBackup(t *testing.T) {
 	require.NoError(t, os.WriteFile(settings, []byte(`{"model":"opus"}`), 0o600))
 	require.NoError(t, os.WriteFile(settings+".bak", []byte("the user's own"), 0o600))
 
-	for range 2 {
+	// Two installs that change the file (one that doesn't leaves it alone).
+	for _, command := range []string{"/old/ksesh", "/bin/ksesh"} {
 		cmd := newAgentInstallCommand()
-		cmd.SetArgs([]string{"--settings", settings, "--command", "/bin/ksesh"})
+		cmd.SetArgs([]string{"--settings", settings, "--command", command})
 		cmd.SetOut(&strings.Builder{})
 		require.NoError(t, cmd.Execute())
 	}
