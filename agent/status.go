@@ -4,7 +4,7 @@
 // An agent reports its state through user variables on its own kitty window,
 // set by `ksesh agent hook` from the agent's hooks:
 //
-//	ksesh_agent      the agent's name ("claude")
+//	ksesh_agent      the agent's name ("claude", "codex", "gemini")
 //	ksesh_status     working | waiting | done | error | idle
 //	ksesh_status_at  unix seconds of the last change
 //	ksesh_msg        why it is waiting, what it finished with, or the error
