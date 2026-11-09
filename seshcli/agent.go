@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"time"
 
@@ -46,6 +47,7 @@ with contrib/ksesh_agents.py, in kitty's tab bar and desktop notifications.`,
 		newAgentInstallCommand(),
 		newAgentUninstallCommand(),
 	)
+	cmd.AddCommand(newThreadCommands(base)...)
 	return cmd
 }
 
@@ -229,10 +231,10 @@ next one, so it cycles through all of them.
 Bind it in kitty.conf with a background launch, so it runs against the window
 you're in:
 
-    map super+j launch --type=background ksesh agent next`,
+    map super+j launch --type=background --allow-remote-control ksesh agent next`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return focusAgent(cmd, base, agent.Next, "no agent needs you")
+			return focusAgent(cmd, base, nextAgent, "no agent needs you")
 		},
 	}
 }
@@ -243,12 +245,25 @@ func newAgentLastCommand(base *BaseDeps) *cobra.Command {
 		Short: "Go back to the agent you were with before this one",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return focusAgent(cmd, base, agent.Last, "no other agent")
+			return focusAgent(cmd, base, func(_ *Deps, agents []*model.Agent, current int) (*model.Agent, bool) {
+				return agent.Last(agents, current)
+			}, "no other agent")
 		},
 	}
 }
 
-func focusAgent(cmd *cobra.Command, base *BaseDeps, pick func([]*model.Agent, int) (*model.Agent, bool), none string) error {
+// nextAgent is agent.Next, leaving out snoozed and settled threads: you put
+// them away, so they don't need you.
+func nextAgent(deps *Deps, agents []*model.Agent, current int) (*model.Agent, bool) {
+	opts, now := threadOpts(deps.Config), time.Now()
+	agents = slices.DeleteFunc(agents, func(a *model.Agent) bool {
+		s := agent.SectionOf(a, now, opts)
+		return s == agent.Snoozed || s == agent.Settled
+	})
+	return agent.Next(agents, current)
+}
+
+func focusAgent(cmd *cobra.Command, base *BaseDeps, pick func(*Deps, []*model.Agent, int) (*model.Agent, bool), none string) error {
 	deps, err := buildDeps(cmd, base)
 	if err != nil {
 		return err
@@ -258,7 +273,7 @@ func focusAgent(cmd *cobra.Command, base *BaseDeps, pick func([]*model.Agent, in
 		return err
 	}
 	current, _ := deps.Kitty.CurrentWindowID()
-	target, ok := pick(agents, current)
+	target, ok := pick(deps, agents, current)
 	if !ok {
 		fmt.Fprintln(cmd.ErrOrStderr(), none)
 		return nil
