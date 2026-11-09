@@ -2,15 +2,13 @@ package seshcli
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
-	"io/fs"
 	"log/slog"
 	"os"
-	"path/filepath"
 	"slices"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -29,7 +27,8 @@ func NewAgentCommand(base *BaseDeps) *cobra.Command {
 
 An agent reports its status (working, waiting, done, error, idle) through user
 variables on its own kitty window, set by 'ksesh agent hook' from its hooks:
-'ksesh agent install' adds them to Claude Code. The status then shows in
+'ksesh agent install' adds them to Claude Code (--codex for Codex, --gemini
+for Gemini CLI, --all for the three). The status then shows in
 'ksesh agent list', next to the session in 'ksesh list -i' and the picker, and,
 with contrib/ksesh_agents.py, in kitty's tab bar and desktop notifications.`,
 	}
@@ -52,22 +51,31 @@ with contrib/ksesh_agents.py, in kitty's tab bar and desktop notifications.`,
 }
 
 func newAgentHookCommand(base *BaseDeps) *cobra.Command {
-	return &cobra.Command{
-		Use:   "hook",
-		Short: "Record a Claude Code hook event (reads the hook's JSON on stdin)",
-		Long: `Record a Claude Code hook event on the kitty window Claude runs in.
+	cmd := &cobra.Command{
+		Use:   "hook [json]",
+		Short: "Record a coding agent's hook event (reads the hook's JSON on stdin)",
+		Long: `Record a hook event of Claude Code, Codex (--agent codex) or Gemini CLI
+(--agent gemini) on the kitty window the agent runs in.
 
-It reads the hook's JSON from stdin, never prints anything (Claude would read it
-as context) and always succeeds, so a kitty that can't be reached never gets in
-Claude's way. Outside kitty, or without a listen_on socket, it does nothing:
-remote control over the tty would write into Claude's own terminal.`,
-		Args: cobra.NoArgs,
+It reads the hook's JSON from stdin, or from its argument as Codex's notify
+passes it, never prints anything (the agent would read it as context) and
+always succeeds, so a kitty that can't be reached never gets in the agent's
+way. Outside kitty, or without a listen_on socket, it does nothing: remote
+control over the tty would write into the agent's own terminal.`,
+		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			input, _ := io.ReadAll(io.LimitReader(cmd.InOrStdin(), 1<<20))
+			var input []byte
+			if len(args) == 1 {
+				input = []byte(args[0])
+			} else {
+				// Gemini's tool confirmations carry whole files.
+				input, _ = io.ReadAll(io.LimitReader(cmd.InOrStdin(), 64<<20))
+			}
 			if os.Getenv("KITTY_WINDOW_ID") == "" || os.Getenv("KITTY_LISTEN_ON") == "" {
 				return nil
 			}
-			update, ok := agent.FromClaudeHook(input)
+			name, _ := cmd.Flags().GetString("agent")
+			update, ok := agent.FromHook(name, input)
 			if !ok {
 				return nil
 			}
@@ -77,6 +85,8 @@ remote control over the tty would write into Claude's own terminal.`,
 			return nil
 		},
 	}
+	cmd.Flags().String("agent", "claude", "whose hook it is: "+strings.Join(agent.HookAgents, ", "))
+	return cmd
 }
 
 // quietKitty builds the kitty client without buildDeps, which prints config
@@ -96,8 +106,8 @@ func newAgentSetCommand(base *BaseDeps) *cobra.Command {
 		Short: "Set the status of the agent in this kitty window",
 		Long: `Set the status of the agent in this kitty window, or another one with --window.
 
-For agents without Claude Code's hooks: call it from their own notification
-hooks (Codex's notify, a wrapper script, …). 'clear' drops the status.`,
+For agents whose hooks 'ksesh agent hook' doesn't read: call it from their own
+notification hooks, a wrapper script, …. 'clear' drops the status.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			deps, err := buildDeps(cmd, base)
@@ -279,115 +289,4 @@ func focusAgent(cmd *cobra.Command, base *BaseDeps, pick func(*Deps, []*model.Ag
 		return nil
 	}
 	return deps.Kitty.FocusWindow(target.WindowID)
-}
-
-func claudeSettingsPath() (string, error) {
-	if dir := os.Getenv("CLAUDE_CONFIG_DIR"); dir != "" {
-		return filepath.Join(dir, "settings.json"), nil
-	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", err
-	}
-	return filepath.Join(home, ".claude", "settings.json"), nil
-}
-
-func newAgentInstallCommand() *cobra.Command {
-	cmd := &cobra.Command{
-		Use:   "install",
-		Short: "Add ksesh's hooks to Claude Code's settings.json",
-		Long: `Add the hooks that report Claude Code's status to kitty to ~/.claude/settings.json
-(or --settings). Your other settings and hooks are kept; running it again
-replaces the hooks it added before. The previous file is kept next to it as
-settings.json.ksesh-<time>.bak.`,
-		Args: cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, args []string) error {
-			return editClaudeSettings(cmd, func(settings []byte) ([]byte, error) {
-				command, _ := cmd.Flags().GetString("command")
-				if command == "" {
-					exe, err := os.Executable()
-					if err != nil {
-						return nil, err
-					}
-					command = exe
-				}
-				return agent.InstallClaudeHooks(settings, command)
-			})
-		},
-	}
-	cmd.Flags().String("settings", "", "Claude settings file (default ~/.claude/settings.json)")
-	cmd.Flags().Bool("print", false, "print the new settings instead of writing them")
-	cmd.Flags().String("command", "", "how the hooks run ksesh (default: this binary's path)")
-	return cmd
-}
-
-func newAgentUninstallCommand() *cobra.Command {
-	cmd := &cobra.Command{
-		Use:   "uninstall",
-		Short: "Remove ksesh's hooks from Claude Code's settings.json",
-		Args:  cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, args []string) error {
-			return editClaudeSettings(cmd, agent.UninstallClaudeHooks)
-		},
-	}
-	cmd.Flags().String("settings", "", "Claude settings file (default ~/.claude/settings.json)")
-	cmd.Flags().Bool("print", false, "print the new settings instead of writing them")
-	return cmd
-}
-
-func editClaudeSettings(cmd *cobra.Command, edit func([]byte) ([]byte, error)) error {
-	path, _ := cmd.Flags().GetString("settings")
-	if path == "" {
-		var err error
-		if path, err = claudeSettingsPath(); err != nil {
-			return err
-		}
-	}
-	old, err := os.ReadFile(path)
-	if err != nil && !errors.Is(err, fs.ErrNotExist) {
-		return err
-	}
-	updated, err := edit(old)
-	if err != nil {
-		return err
-	}
-	if printOnly, _ := cmd.Flags().GetBool("print"); printOnly {
-		_, err := cmd.OutOrStdout().Write(updated)
-		return err
-	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return err
-	}
-	mode := fs.FileMode(0o600)
-	if info, err := os.Stat(path); err == nil {
-		mode = info.Mode().Perm()
-	}
-	backup := ""
-	if old != nil {
-		// A fresh name every time: an existing backup may be the user's own.
-		stamp := fmt.Sprintf("%s.ksesh-%s", path, time.Now().Format("20060102-150405"))
-		var f *os.File
-		for i := 0; f == nil; i++ {
-			backup = stamp + ".bak"
-			if i > 0 {
-				backup = fmt.Sprintf("%s-%d.bak", stamp, i)
-			}
-			f, err = os.OpenFile(backup, os.O_WRONLY|os.O_CREATE|os.O_EXCL, mode)
-			if err != nil && (!errors.Is(err, fs.ErrExist) || i > 100) {
-				return fmt.Errorf("couldn't back up %s: %w", path, err)
-			}
-		}
-		_, werr := f.Write(old)
-		if err := errors.Join(werr, f.Close()); err != nil {
-			return fmt.Errorf("couldn't back up %s: %w", path, err)
-		}
-	}
-	if err := os.WriteFile(path, updated, mode); err != nil {
-		return err
-	}
-	fmt.Fprintln(cmd.OutOrStdout(), "updated", path)
-	if backup != "" {
-		fmt.Fprintln(cmd.OutOrStdout(), "previous version kept in", backup)
-	}
-	return nil
 }

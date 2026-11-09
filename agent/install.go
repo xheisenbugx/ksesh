@@ -11,12 +11,15 @@ import (
 // install or uninstall finds its own entries among the user's other hooks.
 const HookMarker = "agent hook"
 
-// ClaudeHookEvents are the Claude Code events `ksesh agent hook` listens to,
-// each with its matcher ("" for none).
-var ClaudeHookEvents = []struct {
+// HookEvent is an agent's hook event ksesh listens to, with its matcher (""
+// for none).
+type HookEvent struct {
 	Event   string
 	Matcher string
-}{
+}
+
+// ClaudeHookEvents are the Claude Code events `ksesh agent hook` listens to.
+var ClaudeHookEvents = []HookEvent{
 	{"SessionStart", ""},
 	{"UserPromptSubmit", ""},
 	{"PostToolUse", ""},
@@ -34,53 +37,53 @@ var ClaudeHookEvents = []struct {
 // other setting and hook is kept, in the order it was in. command is how the
 // hook runs ksesh, normally the absolute path of the binary.
 func InstallClaudeHooks(settings []byte, command string) ([]byte, error) {
-	return editClaudeHooks(settings, func(hooks *object) error {
-		for _, ev := range ClaudeHookEvents {
-			entry := map[string]any{
-				"hooks": []map[string]any{{
-					"type":    "command",
-					"command": command + " " + HookMarker,
-					"timeout": 5,
-				}},
-			}
-			if ev.Matcher != "" {
-				entry = map[string]any{"matcher": ev.Matcher, "hooks": entry["hooks"]}
-			}
-			raw, err := marshal(entry)
-			if err != nil {
-				return err
-			}
-			if err := appendEntry(hooks, ev.Event, raw); err != nil {
-				return err
-			}
-		}
-		return nil
-	})
+	handler := map[string]any{
+		"type":    "command",
+		"command": command + " " + HookMarker,
+		"timeout": 5,
+	}
+	return editHooksJSON(settings, "Claude settings", ClaudeHookEvents, handler)
 }
 
 // UninstallClaudeHooks removes the hooks InstallClaudeHooks added.
 func UninstallClaudeHooks(settings []byte) ([]byte, error) {
-	return editClaudeHooks(settings, func(*object) error { return nil })
+	return editHooksJSON(settings, "Claude settings", nil, nil)
 }
 
-func editClaudeHooks(settings []byte, add func(*object) error) ([]byte, error) {
+// editHooksJSON rewrites the "hooks" object of a JSON settings file, laid out
+// the way Claude Code, Codex and Gemini CLI all read it ({event: [{matcher,
+// hooks: [handler]}]}): it drops the matcher groups ksesh added before, then
+// appends one running handler to each of events. Appending leaves the user's
+// own groups where they were, which matters to Codex: it trusts a hook by its
+// position. what names the file in errors.
+func editHooksJSON(settings []byte, what string, events []HookEvent, handler map[string]any) ([]byte, error) {
 	root := &object{}
 	if len(bytes.TrimSpace(settings)) > 0 {
 		if err := json.Unmarshal(settings, root); err != nil {
-			return nil, fmt.Errorf("couldn't parse Claude settings: %w", err)
+			return nil, fmt.Errorf("couldn't parse %s: %w", what, err)
 		}
 	}
 	hooks := &object{}
 	if raw, ok := root.get("hooks"); ok {
 		if err := json.Unmarshal(raw, hooks); err != nil {
-			return nil, fmt.Errorf("couldn't parse the hooks in Claude settings: %w", err)
+			return nil, fmt.Errorf("couldn't parse the hooks in %s: %w", what, err)
 		}
 	}
-	if err := removeOwnEntries(hooks); err != nil {
+	if err := removeOwnEntries(hooks, what); err != nil {
 		return nil, err
 	}
-	if err := add(hooks); err != nil {
-		return nil, err
+	for _, ev := range events {
+		entry := map[string]any{"hooks": []map[string]any{handler}}
+		if ev.Matcher != "" {
+			entry["matcher"] = ev.Matcher
+		}
+		raw, err := marshal(entry)
+		if err != nil {
+			return nil, err
+		}
+		if err := appendEntry(hooks, ev.Event, raw, what); err != nil {
+			return nil, err
+		}
 	}
 	raw, err := marshal(hooks)
 	if err != nil {
@@ -112,12 +115,12 @@ type hookEntry struct {
 
 // removeOwnEntries drops every matcher group whose hooks are all ksesh's, and
 // every event left with no group.
-func removeOwnEntries(hooks *object) error {
+func removeOwnEntries(hooks *object, what string) error {
 	for _, event := range append([]string(nil), hooks.keys...) {
 		raw, _ := hooks.get(event)
 		var entries []json.RawMessage
 		if err := json.Unmarshal(raw, &entries); err != nil {
-			return fmt.Errorf("couldn't parse the %s hooks in Claude settings: %w", event, err)
+			return fmt.Errorf("couldn't parse the %s hooks in %s: %w", event, what, err)
 		}
 		kept := entries[:0]
 		for _, e := range entries {
@@ -146,18 +149,32 @@ func isOwnEntry(raw json.RawMessage) bool {
 		return false
 	}
 	for _, h := range e.Hooks {
-		if !strings.Contains(h.Command, "ksesh") || !strings.HasSuffix(h.Command, HookMarker) {
+		if !IsOwnHookCommand(h.Command) {
 			return false
 		}
 	}
 	return true
 }
 
-func appendEntry(hooks *object, event string, entry json.RawMessage) error {
+// IsOwnHookCommand reports whether a hook command is one ksesh installed:
+// `<ksesh> agent hook` for Claude Code, `<ksesh> agent hook --agent <name>`
+// for the others.
+func IsOwnHookCommand(command string) bool {
+	if !strings.Contains(command, "ksesh") {
+		return false
+	}
+	if strings.HasSuffix(command, HookMarker) {
+		return true
+	}
+	_, name, ok := strings.Cut(command, HookMarker+" --agent ")
+	return ok && name != "" && !strings.ContainsAny(name, " ;&|")
+}
+
+func appendEntry(hooks *object, event string, entry json.RawMessage, what string) error {
 	var entries []json.RawMessage
 	if raw, ok := hooks.get(event); ok {
 		if err := json.Unmarshal(raw, &entries); err != nil {
-			return fmt.Errorf("couldn't parse the %s hooks in Claude settings: %w", event, err)
+			return fmt.Errorf("couldn't parse the %s hooks in %s: %w", event, what, err)
 		}
 	}
 	out, err := marshal(append(entries, entry))
