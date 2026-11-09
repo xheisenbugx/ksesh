@@ -21,6 +21,7 @@ ksesh is a port of sesh (a smart terminal session manager written in Go) to kitt
 - `configurator/` - Configuration management (`ksesh.toml` in `$XDG_CONFIG_HOME/ksesh`, falling back to sesh's `sesh/sesh.toml`)
 - `kitty/` - kitty backend over `kitten @` remote control. Sessions are derived from `kitten @ ls` (windows sharing a `session_name`); tmux windows map to kitty tabs and panes to kitty windows. `freeze.go` explains why the picker snapshots kitty in tty mode.
 - `agent/` - Coding agent status (working/waiting/done/error/idle): Claude Code hook mapping, next/last selection, hook install into Claude settings. Status lives in kitty user variables on the agent's window (`kitty/agent.go`); `contrib/ksesh_agents.py` draws it in kitty's tab bar and sends notifications
+- `sidebar/` - The thread sidebar (`ksesh sidebar`): a bubbletea TUI in a kitty `tab-dock` window (kitty 0.50+) listing agents as T3 Code-style threads. Sections and the pin/snooze/settle rules are pure functions in `agent/thread.go`; triage state is more user variables on the agent's window. Sidebar windows carry `ksesh_role=sidebar` and are kept out of sessions
 - `sessionfile/` - Finds kitty session files (the tmuxinator counterpart)
 - `zoxide/` - Frecency backend integration
 - `model/` - Shared data structures (Config, SeshSession, ConnectOpts)

@@ -212,8 +212,8 @@ tab_title_template "{custom}"
 tab_bar_style custom
 
 # Next agent that needs you / back to the previous agent / agent picker.
-map super+j       launch --type=background ksesh agent next
-map super+shift+j launch --type=background ksesh agent last
+map super+j       launch --type=background --allow-remote-control ksesh agent next
+map super+shift+j launch --type=background --allow-remote-control ksesh agent last
 map super+a       launch --type=overlay --cwd=current ~/.config/kitty/ksesh-agents-fzf
 ```
 
@@ -222,6 +222,170 @@ kitty reads `tab_bar.py` and watchers once and keeps them until it quits.
 your sessions don't have to go. `ksesh_agents.py` itself is re-read whenever it
 changes. The hooks need `listen_on`: without a socket they do nothing rather
 than talk to kitty over Claude's own terminal.
+
+## Threads and the sidebar
+
+With many agents going, a list sorted by urgency isn't enough: some you want
+kept in view, some you want out of the way until later, some you are done
+with. ksesh triages agents the way [T3 Code](https://github.com/pingdotgg/t3code)
+triages its threads, and shows them in a **sidebar docked to the left of every
+tab** (kitty 0.50's `launch --type=tab-dock`):
+
+```
+ Threads ╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱
+ all sessions · 6              1   1   the scope, and what needs you
+
+  PINNED ──────────────────────── 1
+   Refactor auth                1h
+    api · › split the session store
+                                         Pinned  yours, in your order
+  INBOX ───────────────────────── 2     Inbox   the latest activity first
+▌  Fix the login redirect       2m ●   ▌ selected   ● the thread you're in
+▌   api · Allow Bash: npm test
+   Write the README             5m
+    docs · Added a Threads section
+
+ ────────────────────────────────────
+ ▸ ⠹ Working                        2   agents running that don't need you
+ ▸  Snoozed                        1   hidden until a time you picked
+ ▸  Settled                        9   done with
+ ────────────────────────────────────
+ a approve · x deny · r reply · ? keys
+```
+
+The look borrows from [Crush](https://github.com/charmbracelet/crush): a
+gradient masthead running out into stripes, section labels with a rule to
+their count, and a status bar. Its colors are mixed from your terminal's own
+background and foreground, so it suits light and dark themes alike; the
+selected row is tinted with the accent and marked with a bar, the one under
+the mouse is lifted a little.
+
+Each thread shows the title its agent gave it, how long ago it last did
+something, and under that its session and what it needs, did or is on. Titles
+of threads that need you are bold, and a waiting or failed agent's message is
+colored. Working agents spin, a closed shelf holding the thread you're in shows
+its `●`, and the status bar only offers the keys that do something for the
+selected thread.
+
+Every agent is a thread in exactly one section, the first that applies:
+**Snoozed**, **Settled**, **Pinned**, **Working**, or the inbox. The shelves at
+the bottom start closed. A closed shelf still shows the thread you're on, and
+an open Settled shows ten threads and then a "more" row. Threads also move on
+their own, the way they do in T3 Code:
+
+- **Sending an agent a prompt** un-settles its thread and ends its snooze.
+- **An agent that starts waiting on you or fails** un-settles its thread, and
+  wakes it early if it is snoozed. It is then marked as woken (a magenta clock)
+  until you look at it. Finishing a turn doesn't wake it, so a long job you
+  snoozed stays out of the way.
+- **A thread idle for 7 days settles itself** (`auto_settle_after_days`),
+  unless it is pinned, snoozed, working, waiting or failed, or you took it out
+  of Settled by hand since it last did something.
+- **Pinning** un-settles and wakes a thread. **Settling** unpins and wakes
+  it, and is refused while the agent is working or waiting on you.
+
+Like the status, all of this lives in user variables on the agent's window
+(`ksesh_pin`, `ksesh_snooze_until`, `ksesh_settled_at`, …), so it lasts as
+long as the window and needs nothing running on the side.
+
+In the sidebar:
+
+| key          | does                                                  |
+| ------------ | ----------------------------------------------------- |
+| `enter` `l`  | go to the thread (or open/close a shelf), also a click |
+| `esc` `h`    | back to the window you were in                        |
+| `j` `k` `g` `G` `tab` | move; `tab` jumps to the next shelf          |
+| `p`          | pin or unpin; `K` `J` move a pin up or down            |
+| `s`          | settle or un-settle                                   |
+| `z`          | snooze: in 1 or 3 hours, this evening, tomorrow 9:00, next Monday 9:00, or `c` for any time (`90m`, `2d`, `15:04`, `2026-12-01 09:00`) |
+| `w`          | wake a snoozed thread, or dismiss the woken mark       |
+| `u`          | undo the last pin, settle, snooze or wake             |
+| `m`          | the thread's menu, also a right click                 |
+| `a` `x` `r`  | approve, deny or interrupt, reply, without switching  |
+| `X`          | close the agent's window (asks first)                 |
+| `f`          | only this tab's session, or every session             |
+| `q`          | hide the sidebar in every tab                         |
+
+The mouse works too, as in T3 Code. Hover a thread and its time gives way to
+buttons, pin, snooze and settle (wake and settle on a snoozed one, restore on
+a settled one), and the status bar says what the one under the mouse does.
+Right click a thread, or press `m`, for a menu of everything that can be done
+to it; its Snooze opens the times in its place.
+
+```
+  INBOX ───────────────────────── 2
+▌  Write docs                 
+▌   ap╭──────────────────────╮
+      │   Go to thread    ↵ │
+      │   Pin             p │
+      │   Snooze          › │
+      │   Settle          s │
+      ├──────────────────────┤
+      │   Reply…          r │
+      ├──────────────────────┤
+      │   Close window…   X │
+      ╰──────────────────────╯
+```
+
+The same actions work from the command line, on the agent in the current
+window or the one given, so they can be bound in kitty directly:
+
+```sh
+ksesh agent pin [window-id]           # toggle
+ksesh agent settle [window-id]        # toggle
+ksesh agent snooze 3h [window-id]     # or evening, tomorrow, next-week, 90m, 15:04…
+ksesh agent wake [window-id]
+ksesh sidebar print [--json]          # the threads by section
+ksesh sidebar next / prev             # go down / up the sidebar's order
+```
+
+`ksesh agent next` skips snoozed and settled threads, and so do the tab bar's
+badges and attention strip: you put those away.
+
+Setup: the sidebar needs `listen_on` and the watcher from the
+[Agents](#agents) section, which gives every tab you go to a sidebar while
+it's on. Then add to `kitty.conf` (a background launch only gets kitty's
+socket with `--allow-remote-control`; without it, `ksesh` can't reach kitty):
+
+```conf
+map super+b         launch --type=background --allow-remote-control ksesh sidebar toggle
+map super+shift+b   launch --type=background --allow-remote-control ksesh sidebar focus
+map super+ctrl+p    launch --type=background --allow-remote-control ksesh agent pin
+map super+ctrl+s    launch --type=background --allow-remote-control ksesh agent settle
+map super+ctrl+z    launch --type=background --allow-remote-control ksesh agent snooze 1h
+map super+ctrl+w    launch --type=background --allow-remote-control ksesh agent wake
+map super+ctrl+j    launch --type=background --allow-remote-control ksesh sidebar next
+map super+ctrl+k    launch --type=background --allow-remote-control ksesh sidebar prev
+```
+
+Full-window pickers don't fit in the sidebar. Bind their keys twice, so that
+pressed in the sidebar they open over the window beside it instead:
+
+```conf
+map --when-focus-on 'not var:ksesh_role=sidebar' super+a launch --type=overlay --cwd=current ~/.config/kitty/ksesh-agents-fzf
+map --when-focus-on var:ksesh_role=sidebar super+a launch --type=background --allow-remote-control ksesh sidebar overlay -- ~/.config/kitty/ksesh-agents-fzf
+```
+
+A running sidebar restarts itself into a new build of `ksesh` within a couple
+of seconds of it being installed.
+
+`super+b` shows or hides the sidebar everywhere. `super+shift+b` moves the
+focus into the tab's sidebar, opening it if needed, and back out again.
+Configure it in `ksesh.toml`:
+
+```toml
+[sidebar]
+edge = "left"               # or "right"
+width = "38"                # columns, or a share of the tab: "20%"
+auto_settle_after_days = 7  # 0 never settles a thread on its own
+```
+
+The sidebar is a window of its own, so it never counts as one of the session's
+windows. A tab's sidebar closes with the tab's last window, and kitty saves it
+with the tab in session files. Sidebars of tabs in the background refresh every
+5 seconds instead of every second. Whether the sidebar is on and which shelves
+are open is shared by every tab's sidebar, in
+`~/.local/state/ksesh/sidebar.json`.
 
 ## Worktrees
 
