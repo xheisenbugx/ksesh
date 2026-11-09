@@ -134,6 +134,13 @@ type RealKitty struct {
 	mu    sync.Mutex
 	state *state // cached `kitten @ ls`, dropped by every mutation
 
+	// See snapshot.go.
+	snapshotPath string
+	snapshotPID  int
+	snapshotErr  string    // why the snapshot was last passed over
+	mutatedAt    time.Time // when ksesh last changed kitty
+	clock        func() time.Time
+
 	// See Freeze.
 	frozen       bool
 	captures     map[int]string
@@ -253,6 +260,9 @@ func (k *RealKitty) rc(args ...string) (string, error) {
 func (k *RealKitty) mutate(args ...string) (string, error) {
 	k.invalidate()
 	out, err := k.rc(args...)
+	k.mu.Lock()
+	k.mutatedAt = k.now()
+	k.mu.Unlock()
 	k.invalidate()
 	return out, err
 }

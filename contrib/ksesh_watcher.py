@@ -30,36 +30,46 @@ def on_load(boss, data) -> None:
 
     if isinstance(getattr(Boss, 'active_session', None), property):
         Boss.active_session = property(_active_session)
+    _snapshot('on_load', boss, data)
 
 
 # Agent status (see ksesh_agents.py, next to this file): redraw the tab bar and
 # notify when an agent's status changes, and mark a finished agent seen once
-# its window is focused. ksesh_agents.py is re-read whenever it changes, so
-# editing it needs no restart; kitty only reads this file once.
+# its window is focused. And kitty's state for ksesh's sidebars (see
+# ksesh_snapshot.py), written whenever something they show changes. Both are
+# re-read whenever they change, so editing them needs no restart; kitty only
+# reads this file once (contrib/ksesh_reload.py reloads it).
 
 import os
 
-_AGENTS_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'ksesh_agents.py')
-_agents_cache: dict = {}
+_DIR = os.path.dirname(os.path.abspath(__file__))
+_AGENTS_PATH = os.path.join(_DIR, 'ksesh_agents.py')
+_SNAPSHOT_PATH = os.path.join(_DIR, 'ksesh_snapshot.py')
+_cache: dict = {}
 
 
-def _agents() -> dict:
+def _module(path: str) -> dict:
     try:
-        mtime = os.stat(_AGENTS_PATH).st_mtime
+        mtime = os.stat(path).st_mtime
     except OSError:
         return {}
-    if _agents_cache.get('mtime') != mtime:
+    cached = _cache.get(path)
+    if cached is None or cached[0] != mtime:
         import runpy
 
         try:
-            _agents_cache['ns'] = runpy.run_path(_AGENTS_PATH)
+            ns = runpy.run_path(path)
         except Exception as e:
             from kitty.utils import log_error
 
-            log_error(f'ksesh_watcher: failed to load {_AGENTS_PATH}: {e}')
-            _agents_cache['ns'] = {}
-        _agents_cache['mtime'] = mtime
-    return _agents_cache['ns']
+            log_error(f'ksesh_watcher: failed to load {path}: {e}')
+            ns = {}
+        cached = _cache[path] = (mtime, ns)
+    return cached[1]
+
+
+def _agents() -> dict:
+    return _module(_AGENTS_PATH)
 
 
 def _call(name: str, boss, window, data) -> None:
@@ -68,13 +78,50 @@ def _call(name: str, boss, window, data) -> None:
         fn(boss, window, data)
 
 
+def _snapshot(name: str, *args) -> None:
+    # Never let the snapshot get in the way of kitty, or of the agent status.
+    try:
+        fn = _module(_SNAPSHOT_PATH).get(name)
+        if fn is not None:
+            fn(*args)
+    except Exception as e:
+        from kitty.utils import log_error
+
+        log_error(f'ksesh_watcher: ksesh_snapshot.{name} failed: {e}')
+
+
 def on_set_user_var(boss, window, data) -> None:
-    _call('on_set_user_var', boss, window, data)
+    try:
+        _call('on_set_user_var', boss, window, data)
+    finally:
+        _snapshot('on_event', boss, window, data)
 
 
 def on_focus_change(boss, window, data) -> None:
+    # The snapshot first: ksesh_agents.py has the sidebar of a tab you go to
+    # look again, and it reads the snapshot.
+    _snapshot('on_focus_change', boss, window, data)
     _call('on_focus_change', boss, window, data)
 
 
 def on_close(boss, window, data) -> None:
-    _call('on_close', boss, window, data)
+    try:
+        _call('on_close', boss, window, data)
+    finally:
+        _snapshot('on_event', boss, window, data)
+
+
+def on_title_change(boss, window, data) -> None:
+    _snapshot('on_event', boss, window, data)
+
+
+def on_tab_bar_dirty(boss, window, data) -> None:
+    _snapshot('on_event', boss, window, data)
+
+
+def on_cmd_startstop(boss, window, data) -> None:
+    _snapshot('on_event', boss, window, data)
+
+
+def on_quit(boss, window, data) -> None:
+    _snapshot('on_quit', boss, window, data)

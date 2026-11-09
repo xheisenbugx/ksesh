@@ -42,6 +42,11 @@ type Options struct {
 	// Changed reports whether ksesh was rebuilt since the sidebar started,
 	// so it can restart into the new one. Nil never restarts.
 	Changed func() bool
+	// Watch reports whether kitty's snapshot changed since it was last
+	// asked, and whether it is live (kitty keeps it up). While it is, the
+	// sidebar looks at kitty again as soon as it changes rather than on a
+	// timer. Nil, or not live, refreshes on the timer.
+	Watch func() (changed, live bool)
 }
 
 // How often the sidebar asks kitty what changed: often while it is on
@@ -51,6 +56,10 @@ const (
 	refreshHidden = 5 * time.Second
 	flashFor      = 4 * time.Second
 	maxUndo       = 20
+	// How often a sidebar checks kitty's snapshot for a change: a stat, so
+	// it can be often. In the background it still only refreshes every
+	// refreshHidden, but notices at once when its tab comes to the front.
+	watchEvery = 200 * time.Millisecond
 )
 
 type mode int
@@ -144,6 +153,13 @@ type (
 		restart  bool
 	}
 	tickMsg struct{}
+	// watchMsg is a check of kitty's snapshot, changed if it changed since
+	// the last load. due is when the timer would have refreshed: what a
+	// sidebar in the background waits for, and one without a live snapshot.
+	watchMsg struct {
+		changed, live bool
+		due           time.Time
+	}
 	animMsg struct{}
 	// RefreshMsg asks the sidebar to look at kitty again now: sent when its
 	// tab comes to the front, so it doesn't show what it saw while hidden.
@@ -231,6 +247,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case tickMsg:
 		return m, m.load(true)
+	case watchMsg:
+		due := !m.opts.Now().Before(msg.due)
+		if (msg.changed && (m.shown || due)) || (!msg.live && due) {
+			return m, m.load(true)
+		}
+		return m, m.watch(msg.due, msg.changed)
 	case RefreshMsg:
 		return m, m.load(false)
 	case loadedMsg:
@@ -261,7 +283,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if !msg.shown {
 				every = refreshHidden
 			}
-			cmds = append(cmds, tea.Tick(every, func(time.Time) tea.Msg { return tickMsg{} }))
+			if m.opts.Watch != nil {
+				cmds = append(cmds, m.watch(m.opts.Now().Add(every), false))
+			} else {
+				cmds = append(cmds, tea.Tick(every, func(time.Time) tea.Msg { return tickMsg{} }))
+			}
 		}
 		return m, tea.Batch(cmds...)
 	case doneMsg:
@@ -306,6 +332,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.keyNormal(msg)
 	}
 	return m, nil
+}
+
+// watch checks kitty's snapshot for a change in a moment. pending carries a
+// change seen while waiting for due.
+func (m Model) watch(due time.Time, pending bool) tea.Cmd {
+	watch := m.opts.Watch
+	return tea.Tick(watchEvery, func(time.Time) tea.Msg {
+		changed, live := watch()
+		return watchMsg{changed: changed || pending, live: live, due: due}
+	})
 }
 
 func (m *Model) say(text string) {

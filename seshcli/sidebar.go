@@ -83,13 +83,22 @@ Needs listen_on in kitty.conf: a TUI can't share its tty with remote control.`,
 				return err
 			}
 			exe, _ := os.Executable()
-			m := sidebar.New(sidebar.Options{
+			opts := sidebar.Options{
 				Backend:    deps.Kitty,
 				Self:       self,
 				ThreadOpts: threadOpts(deps.Config),
 				StatePath:  path,
 				Changed:    rebuilt(exe),
-			})
+			}
+			// Read kitty from the snapshot contrib/ksesh_snapshot.py keeps,
+			// and look again when it changes, rather than every sidebar
+			// running `kitten @ ls` every second.
+			if k, ok := deps.Kitty.(interface{ UseSnapshot() string }); ok {
+				if snapshot := k.UseSnapshot(); snapshot != "" {
+					opts.Watch = kitty.NewSnapshotWatch(snapshot).Changed
+				}
+			}
+			m := sidebar.New(opts)
 			prog := tea.NewProgram(m)
 			// contrib/ksesh_agents.py sends SIGUSR1 when the sidebar's tab
 			// comes to the front.
