@@ -14,11 +14,14 @@ var inputs = map[mode]struct{ label, placeholder string }{
 	modeSnoozeCustom: {"Snooze for, or until", "90m, 2d, 15:04, 2026-12-01 09:00"},
 	modeReply:        {"Reply", "reply, enter sends"},
 	modeRename:       {"Rename", "a title, empty for the agent's"},
+	modeNewThread:    {"New thread", "what to do, or empty"},
+	modeNewBranch:    {"New worktree", "its branch, e.g. feat/login"},
+	modeNewWorktree:  {"New thread", "what to do, or empty"},
 }
 
 // prompt asks in the footer, starting from value.
 func (m Model) prompt(md mode, value string) (Model, tea.Cmd) {
-	m.mode = md
+	m.mode, m.ask = md, ""
 	m.input.Placeholder = inputs[md].placeholder
 	m.input.SetValue(value)
 	m.input.CursorEnd()
@@ -76,6 +79,19 @@ func (m Model) submit(md mode, text string) (tea.Model, tea.Cmd) {
 		}
 		id := a.WindowID
 		return m, m.do(flash, nil, func(b Backend) error { return b.SetTitle(id, text) })
+	case modeNewThread:
+		return m, m.launchThread(strings.TrimSpace(text))
+	case modeNewBranch:
+		branch := strings.TrimSpace(text)
+		if branch == "" {
+			return m, nil
+		}
+		m.fresh.branch = branch
+		m, cmd := m.prompt(modeNewWorktree, "")
+		m.ask = "New thread on " + branch
+		return m, cmd
+	case modeNewWorktree:
+		return m, m.launchWorktree(strings.TrimSpace(text))
 	}
 	return m, nil
 }

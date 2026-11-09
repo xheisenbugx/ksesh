@@ -2,8 +2,10 @@ package seshcli
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"os/signal"
 	"slices"
 	"strings"
@@ -98,13 +100,15 @@ Needs listen_on in kitty.conf: a TUI can't share its tty with remote control.`,
 				env = append(env, "PATH="+p)
 			}
 			m := sidebar.New(sidebar.Options{
-				Backend:    deps.Kitty,
-				Self:       self,
-				ThreadOpts: threadOpts(deps.Config),
-				StatePath:  path,
-				Changed:    rebuilt(exe),
-				Ksesh:      ksesh,
-				Env:        env,
+				Backend:      deps.Kitty,
+				Self:         self,
+				ThreadOpts:   threadOpts(deps.Config),
+				StatePath:    path,
+				Changed:      rebuilt(exe),
+				Ksesh:        ksesh,
+				Env:          env,
+				AgentCommand: deps.Worktree.AgentCommand,
+				Run:          runKsesh(ksesh),
 			})
 			prog := tea.NewProgram(m)
 			// contrib/ksesh_agents.py sends SIGUSR1 when the sidebar's tab
@@ -137,6 +141,39 @@ Needs listen_on in kitty.conf: a TUI can't share its tty with remote control.`,
 		newSidebarOverlayCommand(base),
 	)
 	return cmd
+}
+
+// runKsesh runs ksesh (the command line kseshCommand gives) with args in dir,
+// for the sidebar to leave a job to one of ksesh's own commands. Its error
+// is the one the command printed.
+func runKsesh(ksesh []string) func(dir string, args ...string) error {
+	return func(dir string, args ...string) error {
+		if len(ksesh) == 0 {
+			return fmt.Errorf("don't know where ksesh is")
+		}
+		c := exec.Command(ksesh[0], append(slices.Clone(ksesh[1:]), args...)...)
+		c.Dir = dir
+		out, err := c.CombinedOutput()
+		if err == nil {
+			return nil
+		}
+		if msg := commandError(string(out)); msg != "" {
+			return errors.New(msg)
+		}
+		return fmt.Errorf("ksesh %s: %w", strings.Join(args, " "), err)
+	}
+}
+
+// commandError is the error a ksesh command printed: cobra's "Error: …"
+// line, else its last line.
+func commandError(out string) string {
+	lines := strings.Split(strings.TrimSpace(out), "\n")
+	for _, line := range lines {
+		if msg, ok := strings.CutPrefix(line, "Error: "); ok {
+			return msg
+		}
+	}
+	return strings.TrimSpace(lines[len(lines)-1])
 }
 
 // rebuilt reports whether the binary at exe was replaced since the sidebar

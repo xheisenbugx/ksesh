@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/xheisenbugx/ksesh/agent"
+	"github.com/xheisenbugx/ksesh/model"
 )
 
 // typeText types text into whatever has the keyboard, a key at a time.
@@ -66,6 +67,89 @@ func TestReviewNeedsAWindowToOpenOver(t *testing.T) {
 	b.EXPECT().LastWorkWindow(9).Return(0, nil).Once()
 	_, cmd := press(t, m, "d")
 	assert.ErrorContains(t, cmd().(doneMsg).err, "no window beside the sidebar")
+}
+
+func TestNewThread(t *testing.T) {
+	m, b := newModel(t)
+	a, _ := m.selectedAgent()
+	a.Path = "/c/api"
+	var asked string
+	m.opts.AgentCommand = func(dir string) string { asked = dir; return "codex" }
+
+	m, _ = press(t, m, "n")
+	require.Equal(t, modeNewThread, m.mode)
+	assert.Contains(t, ansi.Strip(m.View().Content), "New thread in api", "in the selected thread's session")
+	m = typeText(t, m, "fix the user's bug")
+
+	b.EXPECT().NewWindowInSession(model.KittyTabOpts{TargetSession: "api", StartDir: "/c/api", Background: true}).Return("window:42", nil).Once()
+	b.EXPECT().SendKeys("window:42", `codex 'fix the user'"'"'s bug'`).Return("", nil).Once()
+	b.EXPECT().FocusWindow(42).Return(nil).Once()
+	m, cmd := press(t, m, "enter")
+	assert.Equal(t, modeNormal, m.mode)
+	msg := cmd().(doneMsg)
+	require.NoError(t, msg.err)
+	assert.Equal(t, "started codex in api", msg.flash)
+	assert.Equal(t, "/c/api", asked, "the agent of the thread's repo")
+}
+
+func TestNewThreadWithoutAPromptJustStartsTheAgent(t *testing.T) {
+	m, b := newModel(t)
+	m, _ = press(t, m, "G") // a shelf: no thread selected, so the one you're on
+	b.EXPECT().NewWindowInSession(model.KittyTabOpts{TargetSession: "api", Background: true}).Return("window:42", nil).Once()
+	b.EXPECT().SendKeys("window:42", "claude").Return("", nil).Once()
+	b.EXPECT().FocusWindow(42).Return(nil).Once()
+	m, _ = press(t, m, "n")
+	_, cmd := press(t, m, "enter")
+	cmd()
+}
+
+func TestNewThreadInAWorktree(t *testing.T) {
+	m, _ := newModel(t)
+	a, _ := m.selectedAgent()
+	a.Path = "/c/api"
+	var ran []string
+	var dir string
+	m.opts.Run = func(d string, args ...string) error { dir, ran = d, args; return nil }
+
+	m, _ = press(t, m, "N")
+	require.Equal(t, modeNewBranch, m.mode)
+	assert.Contains(t, ansi.Strip(m.View().Content), "New worktree off api")
+	m = typeText(t, m, "feat/login")
+	m, _ = press(t, m, "enter")
+	require.Equal(t, modeNewWorktree, m.mode, "then what to do")
+	assert.Contains(t, ansi.Strip(m.View().Content), "New thread on feat/login")
+	m = typeText(t, m, "add a login page")
+	m, cmd := press(t, m, "enter")
+	msg := cmd().(doneMsg)
+	require.NoError(t, msg.err)
+	assert.Equal(t, "/c/api", dir, "in the thread's repo")
+	assert.Equal(t, []string{"wt", "new", "feat/login", "--prompt", "add a login page"}, ran)
+	assert.Equal(t, "started a thread on feat/login", msg.flash)
+}
+
+func TestNewThreadInAWorktreeSaysWhatWentWrong(t *testing.T) {
+	m, _ := newModel(t)
+	m, _ = press(t, m, "N")
+	assert.Equal(t, modeNormal, m.mode, "no repo to branch off: the thread has no directory")
+	assert.Contains(t, m.flash, "select a thread in the repo")
+
+	a, _ := m.selectedAgent()
+	a.Path = "/c/api"
+	m.opts.Run = func(string, ...string) error { return assert.AnError }
+	m, _ = press(t, m, "N")
+	m = typeText(t, m, "x")
+	m, _ = press(t, m, "enter")
+	_, cmd := press(t, m, "enter")
+	assert.Equal(t, assert.AnError, cmd().(doneMsg).err)
+}
+
+func TestTheMastheadsPlusStartsANewThread(t *testing.T) {
+	m, _ := newModel(t)
+	m, _ = update(m, tea.MouseMotionMsg{X: 33, Y: 0})
+	assert.True(t, m.hoverNew)
+	assert.Contains(t, ansi.Strip(m.footer()[1]), "new thread")
+	m, _ = update(m, tea.MouseClickMsg{X: 33, Y: 0, Button: tea.MouseLeft})
+	assert.Equal(t, modeNewThread, m.mode)
 }
 
 func TestRename(t *testing.T) {

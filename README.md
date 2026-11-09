@@ -300,6 +300,8 @@ In the sidebar:
 | `enter` `l`  | go to the thread (or open/close a shelf), also a click |
 | `esc` `h`    | back to the window you were in                        |
 | `j` `k` `g` `G` `tab` | move; `tab` jumps to the next shelf          |
+| `n`          | new thread: asks what to do, then starts the agent (`agent_command`, default `claude`) on it in a new tab of the selected thread's session and directory, also the masthead's `+` |
+| `N`          | new thread in a new worktree: asks for a branch, then what to do, and runs `ksesh wt new <branch> -p …` in the selected thread's repo |
 | `p`          | pin or unpin; `K` `J` move a pin up or down            |
 | `s`          | settle or un-settle                                   |
 | `z`          | snooze: in 1 or 3 hours, this evening, tomorrow 9:00, next Monday 9:00, or `c` for any time (`90m`, `2d`, `15:04`, `2026-12-01 09:00`) |

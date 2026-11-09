@@ -108,6 +108,17 @@ func TestNewChecksOutARemoteBranchUnderTheConfiguredRoot(t *testing.T) {
 	require.NoError(t, err)
 }
 
+func TestAgentCommand(t *testing.T) {
+	w, _ := newBranchWorktree(t, model.Config{WorktreeConfigs: []model.WorktreeConfig{{Path: "/code/app", AgentCommand: "codex"}}})
+	assert.Equal(t, "codex", w.AgentCommand("/code/app/src"), "the repo's agent_command")
+	assert.Equal(t, DefaultAgentCommand, w.AgentCommand(""))
+
+	plain, m := newBranchWorktree(t, model.Config{})
+	m.git.EXPECT().WorktreeList("/tmp").Return(false, "", nil)
+	assert.Equal(t, DefaultAgentCommand, plain.AgentCommand("/code/app/src"), "no block")
+	assert.Equal(t, DefaultAgentCommand, plain.AgentCommand("/tmp"), "not a repo")
+}
+
 func TestNewReusesAnExistingWorktree(t *testing.T) {
 	w, m := newBranchWorktree(t, model.Config{})
 	target := "/code/app__worktrees/feat-login"

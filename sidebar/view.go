@@ -1,6 +1,7 @@
 package sidebar
 
 import (
+	"cmp"
 	"fmt"
 	"strconv"
 	"strings"
@@ -16,6 +17,15 @@ import (
 
 // headerLines are the title, the line under it and a blank one.
 const headerLines = 3
+
+// newButtonWidth is the cells of the new thread button at the right end of
+// the title.
+const newButtonWidth = 3
+
+// onNewButton reports whether x, y of the screen is on the new thread button.
+func (m Model) onNewButton(x, y int) bool {
+	return y == 0 && x >= m.width-newButtonWidth && x < m.width
+}
 
 // Icons beyond the status ones in agent.GlyphFor: single-cell Font Awesome
 // glyphs from a nerd font, like those.
@@ -158,15 +168,20 @@ func (m Model) View() tea.View {
 }
 
 // title is the sidebar's masthead, in the manner of Crush's: the name on a
-// gradient running out into stripes, and under it the scope and what needs
-// you, by kind.
+// gradient running out into stripes, a + for a new thread, and under it the
+// scope and what needs you, by kind.
 //
-//	Threads ╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱
+//	Threads ╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱  +
 //	all sessions · 6             1  1
 func (m Model) title() []string {
 	name := " Threads "
-	stripes := strings.Repeat("╱", max(m.width-ansi.StringWidth(name)-1, 0))
-	top := m.th.gradient(name+stripes, len([]rune(name)))
+	// At the right end, the new thread button.
+	stripes := strings.Repeat("╱", max(m.width-ansi.StringWidth(name)-newButtonWidth, 0))
+	plus := " " + m.th.accented(iconNew) + " "
+	if m.hoverNew {
+		plus = m.th.button + plus + "\033[49m"
+	}
+	top := m.th.gradient(name+stripes, len([]rune(name))) + plus
 
 	scope := "all sessions"
 	if m.state.Session && m.session != "" {
@@ -254,7 +269,7 @@ func (m Model) renderRow(r row) []string {
 func (m Model) renderEmpty(r row) []string {
 	icon, head, sub := fg(ansicolor.Green, iconDone), "All caught up", "nothing needs you"
 	if r.none {
-		icon, head, sub = m.th.mute(iconRobot), "No agents yet", "start one in any tab"
+		icon, head, sub = m.th.mute(iconRobot), "No agents yet", "n starts one here"
 	}
 	center := func(s string) string {
 		pad := max((m.width-ansi.StringWidth(s))/2, 0)
@@ -489,7 +504,7 @@ type hint struct{ key, does string }
 func (m Model) hints() []hint {
 	r, _, ok := m.selected()
 	if !ok {
-		return []hint{{"?", "keys"}}
+		return []hint{{"n", "new thread"}, {"?", "keys"}}
 	}
 	switch r.kind {
 	case rowHeader:
@@ -555,7 +570,7 @@ func (m Model) footer() []string {
 	line := func(s string) string { return paint(s, "", m.width) }
 	lines := []string{" " + m.th.dim(strings.Repeat("─", max(m.width-2, 0))) + " "}
 	if in, ok := inputs[m.mode]; ok {
-		return append(lines, line(" "+m.th.accented(bold(in.label))), line(" "+m.input.View()))
+		return append(lines, line(" "+m.th.accented(bold(cmp.Or(m.ask, in.label)))), line(" "+m.input.View()))
 	}
 	switch m.mode {
 	case modeSnooze:
@@ -575,6 +590,9 @@ func (m Model) footer() []string {
 	if b, ok := m.hoveredButton(); ok {
 		return append(lines, line(" "+m.th.accented(b.icon)+"  "+b.label+"  "+m.key(b.key)))
 	}
+	if m.hoverNew && m.mode == modeNormal {
+		return append(lines, line(" "+m.th.accented(iconNew)+"  new thread  "+m.key("n")))
+	}
 	if !m.focused {
 		return append(lines, line(""))
 	}
@@ -593,6 +611,7 @@ func (m Model) helpLines() []string {
 		entry("esc h", "back to your window"),
 		entry("j k g G", "move"),
 		entry("tab", "next section"),
+		entry("n N", "new thread, in a worktree"),
 		"",
 		section("Triage"),
 		entry("p", "pin, unpin"),

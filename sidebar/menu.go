@@ -21,7 +21,9 @@ const (
 	iconInterrupt = "" // stop
 	iconReply     = "" // reply
 	iconRename    = "" // pencil
-	iconReview    = "" // code fork
+	iconReview    = "" // eye
+	iconNew       = "" // plus
+	iconBranch    = "" // code fork
 	iconClose     = "" // window close
 	iconUp        = "" // arrow up
 	iconDown      = "" // arrow down
@@ -121,6 +123,11 @@ func (m Model) threadMenu(a *model.Agent) []action {
 		items = append(items, byKey(iconInterrupt, "Interrupt", "x"))
 	}
 	items = append(items, byKey(iconReply, "Reply…", "r"), byKey(iconReview, "Review changes", "d"), byKey(iconRename, "Rename…", "R"), separator)
+	items = append(items, byKey(iconNew, "New thread…", "n"))
+	if m.opts.Run != nil && a.Path != "" {
+		items = append(items, byKey(iconBranch, "New in a worktree…", "N"))
+	}
+	items = append(items, separator)
 	closeIt := byKey(iconClose, "Close window…", "X")
 	closeIt.danger = true
 	return append(items, closeIt)

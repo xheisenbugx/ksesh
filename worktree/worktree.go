@@ -35,6 +35,9 @@ type Worktree interface {
 	RemoveCandidates(opts model.WorktreeRemoveOpts) ([]model.GitWorktree, error)
 	// Remove removes a worktree and, unless keepBranch, its branch.
 	Remove(wt model.GitWorktree, force bool, keepBranch bool) error
+	// AgentCommand is the agent to start in dir: its repo's agent_command,
+	// else claude.
+	AgentCommand(dir string) string
 }
 
 type RealWorktree struct {

@@ -155,6 +155,17 @@ func shellQuote(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", `'"'"'`) + "'"
 }
 
+// AgentCommand is the agent to start in dir: the agent_command of its repo's
+// [[worktree]] block, DefaultAgentCommand without one.
+func (w *RealWorktree) AgentCommand(dir string) string {
+	if dir != "" {
+		if repo, err := w.repoAt(dir); err == nil && repo.cfg.AgentCommand != "" {
+			return repo.cfg.AgentCommand
+		}
+	}
+	return DefaultAgentCommand
+}
+
 // Worktrees lists the repo's worktrees, the main one first, with their state
 // when withStatus is set.
 func (w *RealWorktree) Worktrees(withStatus bool) ([]model.GitWorktree, error) {

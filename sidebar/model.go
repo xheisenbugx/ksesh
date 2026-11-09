@@ -30,6 +30,8 @@ type Backend interface {
 	CloseWindow(windowID int) error
 	CloseSidebars() error
 	OverlayOn(windowID int, env []string, command []string) error
+	NewWindowInSession(opts model.KittyTabOpts) (string, error)
+	SendKeys(target string, command string) (string, error)
 	Refresh()
 }
 
@@ -49,6 +51,13 @@ type Options struct {
 	Ksesh []string
 	// Env is NAME=VALUE pairs for those, such as the sidebar's PATH.
 	Env []string
+	// AgentCommand is the agent a new thread in dir starts: its repo's
+	// agent_command, else claude. Nil always starts claude.
+	AgentCommand func(dir string) string
+	// Run runs ksesh with args in dir and returns what went wrong, for what
+	// the sidebar leaves to ksesh's own commands (ksesh wt new, wt rm). Nil
+	// can't.
+	Run func(dir string, args ...string) error
 }
 
 // How often the sidebar asks kitty what changed: often while it is on
@@ -68,6 +77,11 @@ const (
 	modeSnoozeCustom
 	modeReply
 	modeRename
+	// modeNewThread asks for the prompt of a new thread; modeNewBranch for
+	// the branch of a new worktree, then modeNewWorktree for its prompt.
+	modeNewThread
+	modeNewBranch
+	modeNewWorktree
 	modeConfirmClose
 	modeHelp
 	// modeMenu is a popup open over the list: a thread's context menu, or
@@ -103,6 +117,11 @@ type Model struct {
 
 	mode  mode
 	input textinput.Model
+	// ask, when set, is the question the footer's input asks, in place of
+	// its mode's.
+	ask string
+	// fresh is where a new thread is being started.
+	fresh newThread
 	undo  []undoEntry
 	flash string
 	until time.Time // the flash's
@@ -118,6 +137,7 @@ type Model struct {
 	// hoverButton is which of the hovered thread's buttons the mouse is on,
 	// -1 for none.
 	hoverButton int
+	hoverNew    bool // the mouse is on the new thread button
 	menu        popup
 	frame       int // of the working spinner
 	animating   bool
@@ -216,6 +236,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.hover, m.hoverButton = "", -1
+		m.hoverNew = m.onNewButton(msg.X, msg.Y)
 		if r, nth, ok := m.lineAt(msg.Y); ok && r.selectable() {
 			m.hover = rowKey(r)
 			if nth == 0 {
@@ -231,7 +252,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, tea.Tick(spinEvery, func(time.Time) tea.Msg { return animMsg{} })
 	case tea.BlurMsg:
-		m.hover, m.hoverButton = "", -1
+		m.hover, m.hoverButton, m.hoverNew = "", -1, false
 		m.focused = false
 		if m.mode != modeNormal && m.mode != modeHelp {
 			m.mode = modeNormal
@@ -301,7 +322,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch m.mode {
 		case modeSnooze:
 			return m.keySnooze(msg)
-		case modeSnoozeCustom, modeReply, modeRename:
+		case modeSnoozeCustom, modeReply, modeRename, modeNewThread, modeNewBranch, modeNewWorktree:
 			return m.keyInput(msg)
 		case modeConfirmClose:
 			return m.keyConfirmClose(msg)
@@ -573,6 +594,10 @@ func (m Model) run(key string) (tea.Model, tea.Cmd) {
 		}
 	case "d":
 		return m.review()
+	case "n":
+		return m.startNewThread(false)
+	case "N":
+		return m.startNewThread(true)
 	case "R":
 		if a, ok := m.selectedAgent(); ok {
 			return m.prompt(modeRename, a.CustomTitle)
@@ -814,6 +839,9 @@ func (m Model) click(msg tea.MouseClickMsg) (tea.Model, tea.Cmd) {
 	}
 	if m.mode != modeNormal || (msg.Button != tea.MouseLeft && msg.Button != tea.MouseRight) {
 		return m, nil
+	}
+	if msg.Button == tea.MouseLeft && m.onNewButton(msg.X, msg.Y) {
+		return m.run("n")
 	}
 	r, nth, ok := m.lineAt(msg.Y)
 	if !ok || !r.selectable() {
