@@ -360,6 +360,7 @@ In the sidebar:
 | `m`          | the thread's menu, also a right click                 |
 | `a` `x` `r`  | approve, deny or interrupt, reply, without switching  |
 | `d`          | review it: `ksesh agent diff --pager` over the window beside the sidebar |
+| `P`          | open its pull request in the browser (or click the `#12` under it) |
 | `R`          | rename the thread; empty goes back to the agent's title |
 | `X`          | close the agent's window, or forget a closed thread (asks first) |
 | `A`          | archive a thread in a worktree of its own: `ksesh wt rm` removes the worktree, its branch and session, then the window closes (asks first; wt rm's refusal of uncommitted changes shows in the status bar) |

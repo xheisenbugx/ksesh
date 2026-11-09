@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/xheisenbugx/ksesh/kitty"
 	"github.com/xheisenbugx/ksesh/model"
@@ -251,4 +252,52 @@ func (m Model) review() (tea.Model, tea.Cmd) {
 		}
 		return b.OverlayOn(target, env, command)
 	})
+}
+
+// pullRequest is the pull request of the branch a thread is on, once the
+// sidebar has found one with a URL.
+func (m Model) pullRequest(a *model.Agent) (model.PullRequestState, bool) {
+	info, ok := m.branchOf(a)
+	if !ok || !info.hasPR || info.pr.URL == "" {
+		return model.PullRequestState{}, false
+	}
+	return info.pr, true
+}
+
+// openPR opens the pull request of the selected thread's branch in the
+// browser.
+func (m Model) openPR() (tea.Model, tea.Cmd) {
+	a, ok := m.selectedAgent()
+	if !ok {
+		return m, nil
+	}
+	pr, ok := m.pullRequest(a)
+	if !ok {
+		m.say("no pull request for its branch")
+		return m, nil
+	}
+	open := m.opts.OpenURL
+	if open == nil {
+		m.say("can't open a browser from here")
+		return m, nil
+	}
+	return m, m.do("opened #"+strconv.Itoa(pr.Number), nil, func(Backend) error { return open(pr.URL) })
+}
+
+// onPRLabel reports whether column x of a thread's second line is on its
+// pull request (" #12" at the end of the line), which a click opens.
+func (m Model) onPRLabel(r row, x int) bool {
+	pr, ok := m.pullRequest(r.agent)
+	if !ok {
+		return false
+	}
+	line := m.renderThread(r, "")[1]
+	line = strings.TrimRight(ansi.Strip(line), " ")
+	icon, _ := prIcon(pr)
+	text := icon + " #" + strconv.Itoa(pr.Number)
+	if !strings.HasSuffix(line, text) {
+		return false
+	}
+	end := ansi.StringWidth(line)
+	return x >= end-ansi.StringWidth(text) && x < end
 }

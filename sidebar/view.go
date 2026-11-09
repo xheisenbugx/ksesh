@@ -610,6 +610,9 @@ func (m Model) hints() []hint {
 		return []hint{{"↵", "go"}, {"w", "dismiss"}, {"s", "settle"}, {"?", "keys"}}
 	}
 	if agent.Status(a.Status) == agent.Done {
+		if _, ok := m.pullRequest(a); ok {
+			return []hint{{"↵", "go"}, {"d", "review"}, {"P", "pr"}, {"s", "settle"}, {"?", "keys"}}
+		}
 		return []hint{{"↵", "go"}, {"d", "review"}, {"s", "settle"}, {"p", pin}, {"?", "keys"}}
 	}
 	return []hint{{"↵", "go"}, {"s", "settle"}, {"p", pin}, {"z", "snooze"}, {"d", "review"}, {"?", "keys"}}
@@ -722,6 +725,7 @@ func (m Model) helpLines() []string {
 		entry("x", "deny, interrupt"),
 		entry("r", "reply"),
 		entry("d", "review its changes"),
+		entry("P", "open its pull request"),
 		entry("R", "rename the thread"),
 		entry("X", "close its window, forget"),
 		entry("A", "archive its worktree"),
