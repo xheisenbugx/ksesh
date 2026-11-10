@@ -74,11 +74,26 @@ bench-baseline:
 bench-compare: (_bench-run ".bench/current.txt")
     go run ./internal/benchchart
 
-# Build sesh binary to GOPATH/bin
+# Where `just install` puts ksesh
+bin := env("KSESH_BIN", home_directory() / ".local/bin")
+
+# Build ksesh, put it in ~/.local/bin (or $KSESH_BIN) and set kitty up for it:
+# its keys, sidebar, tab bar and agent hooks (ksesh setup). Run it again to
+# update; pass setup's flags after it, e.g. `just install --codex`. It is
+# built beside the old one, then moved over it in one step: running sidebars
+# restart into the new binary, and never see half of one.
+install *flags:
+    @mkdir -p "{{bin}}"
+    go build -buildvcs=false -ldflags "-X 'main.version=$(git describe --tags --always --dirty 2>/dev/null || echo dev)'" -o "{{bin}}/.ksesh.new" .
+    @mv "{{bin}}/.ksesh.new" "{{bin}}/ksesh"
+    @echo "installed {{bin}}/ksesh"
+    @"{{bin}}/ksesh" setup {{flags}}
+
+# Build ksesh to GOPATH/bin
 build version="dev":
-    go build -buildvcs=false -ldflags "-X 'main.version={{version}}'" -o `go env GOPATH`/bin/sesh
+    go build -buildvcs=false -ldflags "-X 'main.version={{version}}'" -o `go env GOPATH`/bin/ksesh
 
 # Generate man page
 man: build
     mkdir -p share/man/man1
-    sesh man > share/man/man1/sesh.1
+    ksesh man > share/man/man1/ksesh.1

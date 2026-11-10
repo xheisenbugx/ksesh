@@ -1,0 +1,85 @@
+# ksesh's kitty config, written by `ksesh setup` and included from the end of
+# kitty.conf. Don't edit it: `ksesh setup` writes it again. To change one of
+# its settings or keys, set it in ksesh-local.conf next to it, which is read
+# after this file (kitty.conf itself is read before it).
+#
+# ksesh: {{.Ksesh}}
+# kitty: {{.Dir}}
+
+################
+### Sessions ###
+################
+
+# ksesh drives kitty over remote control. The socket also lets ksesh reach
+# kitty from outside it and keeps the picker smooth (listen_on only takes
+# effect after a full kitty restart).
+allow_remote_control socket-only
+listen_on unix:/tmp/kitty
+
+# Each session has its own tabs: the tab bar only shows the active session's
+# tabs, and cmd+1..9 count only those.
+tab_bar_filter session:.
+# Works around a kitty bug with that filter (closing a tab could jump to
+# another session's tab), keeps the agents' statuses and the sidebars going,
+# and writes kitty's state for the sidebars. See ksesh_watcher.py.
+watcher ksesh_watcher.py
+
+# Start kitty in a session of its own ("main") rather than outside any.
+startup_session sessions/main.kitty-session
+
+# Tab titles from tab_bar.py: the tab's number, its name once renamed, and
+# " · <session>" on the active tab; tabs with an agent show its status, and
+# the right end of the bar names the other sessions with an agent blocked on
+# you. After editing tab_bar.py or the watcher: kitten @ kitten ksesh_reload.py
+tab_title_template "{custom}"
+tab_bar_style custom
+
+# New tabs and windows join the session you're in.
+map kitty_mod+t     new_tab_with_cwd
+map super+t         new_tab_with_cwd
+map kitty_mod+enter new_window_with_cwd
+map super+enter     new_window_with_cwd
+
+# kitty started from the Dock or a launcher doesn't have your shell's PATH:
+# ksesh runs with the one `ksesh setup` saw. Background launches only reach
+# kitty's socket with --allow-remote-control.
+action_alias ksesh         launch --type=background --allow-remote-control --env PATH={{.Path}} {{.Ksesh}}
+action_alias ksesh_overlay launch --type=overlay --cwd=current --env PATH={{.Path}}
+
+# cmd+p: the session picker (^a all ^t kitty ^g configs ^s session files
+# ^x zoxide ^d kill ^f find). cmd+shift+p: back to the previous session.
+# cmd+shift+r: rename the session.
+map super+shift+p goto_session -1
+map super+shift+r ksesh_overlay sh -c 'printf "Rename session to: "; read -r name && [ -n "$name" ] && exec {{.Ksesh}} rename --to "$name"'
+
+# Agents: cmd+j goes to the agent that has waited on you the longest (again
+# for the next one), cmd+shift+j back to the previous one, cmd+a a picker over
+# every agent with its screen as preview.
+map super+j       ksesh agent next
+map super+shift+j ksesh agent last
+
+# Pickers are full-window overlays, too big for the sidebar: pressed in it,
+# they open over the window beside it instead.
+map --when-focus-on 'not var:ksesh_role=sidebar' super+p ksesh_overlay {{.Dir}}/ksesh-fzf
+map --when-focus-on var:ksesh_role=sidebar       super+p ksesh sidebar overlay -- {{.Dir}}/ksesh-fzf
+map --when-focus-on 'not var:ksesh_role=sidebar' super+a ksesh_overlay {{.Dir}}/ksesh-agents-fzf
+map --when-focus-on var:ksesh_role=sidebar       super+a ksesh sidebar overlay -- {{.Dir}}/ksesh-agents-fzf
+
+# Threads: cmd+b shows or hides the sidebar in every tab, cmd+shift+b goes
+# into the tab's sidebar and back out. cmd+ctrl acts on the thread in the
+# window you're in: p pin, s settle, z snooze an hour, w wake; j and k go to
+# the next and previous thread in the sidebar's order, 1-9 to that thread.
+map super+b       ksesh sidebar toggle
+map super+shift+b ksesh sidebar focus
+map super+ctrl+p  ksesh agent pin
+map super+ctrl+s  ksesh agent settle
+map super+ctrl+z  ksesh agent snooze 1h
+map super+ctrl+w  ksesh agent wake
+map super+ctrl+j  ksesh sidebar next
+map super+ctrl+k  ksesh sidebar prev
+{{- range .Goto}}
+map super+ctrl+{{.}}  ksesh sidebar goto {{.}}
+{{- end}}
+
+# Your own changes to the above.
+globinclude ksesh-local.conf

@@ -8,7 +8,9 @@ but every session it creates or switches to is a real kitty session, so kitty's
 own `goto_session`, `tab_bar_filter session:…` and `{session_name}` work with
 them too.
 
-Requires kitty **0.43+** (sessions were introduced in 0.43) and `zoxide`.
+Requires kitty **0.43+** (sessions were introduced in 0.43; the thread
+sidebar needs **0.50+**), `zoxide`, and `fzf` for the pickers. `git` and `gh`
+light up worktrees and pull requests.
 
 ## How sesh concepts map onto kitty
 
@@ -28,53 +30,61 @@ Requires kitty **0.43+** (sessions were introduced in 0.43) and `zoxide`.
 ## Install
 
 ```sh
-git clone <this repo> && cd kitty-sesh
-go build -o ~/.local/bin/ksesh .
+git clone https://github.com/xheisenbugx/ksesh && cd ksesh
+just install
 ```
 
-## kitty setup
+`just install` builds `ksesh` into `~/.local/bin` (`KSESH_BIN` to change it)
+and runs `ksesh setup`, which sets kitty up the same way on every machine:
 
-Add this to `kitty.conf` (restart kitty afterwards — `listen_on` can't be
-reloaded):
+- next to `kitty.conf`: the watcher, tab bar and pickers from
+  [`contrib/`](contrib), and `ksesh.conf`, ksesh's kitty settings and keys
+  (from [`contrib/ksesh.conf.tmpl`](contrib/ksesh.conf.tmpl)), written with
+  this machine's paths: where `ksesh` is and your shell's `PATH`, which kitty
+  started from the Dock or a launcher doesn't have;
+- at the end of `kitty.conf`, `include ksesh.conf`;
+- `sessions/main.kitty-session`, the session kitty starts in, if you have none;
+- the hooks that report Claude Code's status (when it's installed);
+  `just install --codex` and `--gemini` add Codex's and Gemini CLI's;
+- inside kitty, it reloads kitty's config, watcher and tab bar. The first time,
+  quit and start kitty again: kitty only opens ksesh's socket (`listen_on`) at
+  start.
+
+Without `just`: `go build -o ~/.local/bin/ksesh . && ~/.local/bin/ksesh setup`.
+To update, `git pull && just install`: setup only changes what is out of date.
+A file you changed by hand is kept as `<file>.ksesh-<time>.bak` before it is
+replaced, and so is `kitty.conf` whenever setup edits it. `ksesh setup
+--dry-run` says what it would change; `ksesh setup --uninstall` takes it all out
+again.
+
+The keys it maps (cmd is `super`):
+
+| key                  | does                                                       |
+| -------------------- | ---------------------------------------------------------- |
+| `cmd+p`              | session picker ([`ksesh-fzf`](contrib/ksesh-fzf))          |
+| `cmd+shift+p`        | back to the previous session                               |
+| `cmd+shift+r`        | rename the session                                         |
+| `cmd+a`              | agent picker ([`ksesh-agents-fzf`](contrib/ksesh-agents-fzf)) |
+| `cmd+j`, `cmd+shift+j` | the agent that needs you next, the one before            |
+| `cmd+b`              | show or hide the thread sidebar in every tab               |
+| `cmd+shift+b`        | into the tab's sidebar and back out                        |
+| `cmd+ctrl+p` `s` `z` `w` | pin, settle, snooze an hour, wake the thread you're in |
+| `cmd+ctrl+j`, `k`, `1`–`9` | next, previous, nth thread in the sidebar          |
+| `cmd+t`, `cmd+enter` | new tab, new window, in the session you're in              |
+
+Pressed in the sidebar, `cmd+p` and `cmd+a` open over the window beside it.
+To change a key or a setting of `ksesh.conf`, put yours in
+`ksesh-local.conf`, next to it: kitty reads it after `ksesh.conf`, which
+`ksesh setup` writes again on every run. For instance, on Linux:
 
 ```conf
-# ksesh drives kitty over remote control.
-allow_remote_control socket-only
-# A socket lets ksesh reach kitty from anywhere (GUI launchers, Raycast…) and
-# keeps remote control off the tty while the picker is up.
-listen_on unix:/tmp/kitty
-
-# tmux-like: each session has its own tabs; the tab bar shows only the
-# active session's tabs, and cmd+1..9 count only those.
-tab_bar_filter session:.
-# Works around a kitty bug with that filter: without it, closing a tab can jump
-# to a tab of the session you were in before. Copy contrib/ksesh_watcher.py
-# next to kitty.conf.
-watcher ksesh_watcher.py
-tab_title_template "{index} {title}"
-active_tab_title_template "{index} {title}{' · ' + session_name if session_name else ''}"
-
-# Start kitty inside a session ("main") so no tab is left outside one. The
-# file can be as small as "cd ~" and "launch".
-startup_session sessions/main.kitty-session
-
-# New tabs and windows join the session you're in.
-map kitty_mod+t     new_tab_with_cwd
-map kitty_mod+enter new_window_with_cwd
-map super+n           new_os_window_with_cwd
-
-# Session picker in an overlay, and jump back to the previous session.
-map super+p launch --type=overlay --cwd=current ksesh picker -i
-map super+l goto_session -1
+map ctrl+alt+b launch --type=background --allow-remote-control ksesh sidebar toggle
 ```
 
 Without `listen_on`, ksesh still works from inside kitty with
 `allow_remote_control yes`: it then talks to kitty through the terminal, and the
 picker snapshots kitty before it draws (previews included) and defers `ctrl+x`
 kills until it closes, since a TUI and `kitten @` can't share the tty.
-
-If kitty can't find `ksesh` from a key binding, use its full path
-(`~/.local/bin/ksesh`).
 
 ## Usage
 
@@ -114,12 +124,7 @@ fzf-tmux popup binding: `^a` all, `^t` kitty sessions, `^g` configs, `^s`
 session files, `^x` zoxide, `^f` find directories (needs `fd`), `^d` kill the
 highlighted session, with `ksesh preview` on the right. In a tab split into
 several windows it zooms the tab (the `stack` layout) while it is open, so the
-picker gets the whole tab. Copy it next to
-`kitty.conf` and map it to an overlay (it needs `listen_on`):
-
-```conf
-map super+t launch --type=overlay --cwd=current ~/.config/kitty/ksesh-fzf
-```
+picker gets the whole tab. `ksesh setup` maps it to `cmd+p`.
 
 `ksesh kill [name]` closes every window of a session (the attached one without
 a name); like `connect`, it accepts a line from `ksesh list -i` as is.
@@ -225,20 +230,9 @@ In kitty itself, [`contrib/ksesh_agents.py`](contrib/ksesh_agents.py) adds:
 - "done" turns back to idle once you focus the agent's window, or right away
   if it finishes while you're looking at it.
 
-Copy `contrib/ksesh_agents.py`, `contrib/ksesh_watcher.py`,
-`contrib/ksesh_snapshot.py`, `contrib/tab_bar.py` and `contrib/ksesh_reload.py`
-next to `kitty.conf` (merge `tab_bar.py` into yours if you have one), and add:
-
-```conf
-watcher ksesh_watcher.py
-tab_title_template "{custom}"
-tab_bar_style custom
-
-# Next agent that needs you / back to the previous agent / agent picker.
-map super+j       launch --type=background --allow-remote-control ksesh agent next
-map super+shift+j launch --type=background --allow-remote-control ksesh agent last
-map super+a       launch --type=overlay --cwd=current ~/.config/kitty/ksesh-agents-fzf
-```
+`ksesh setup` installs it, with the watcher and tab bar it works through, and
+maps `cmd+j` for the next agent that needs you,
+`cmd+shift+j` back to the previous one and `cmd+a` for the agent picker.
 
 kitty reads `tab_bar.py` and watchers once and keeps them until it quits.
 `kitten @ kitten ksesh_reload.py` loads new ones into the running kitty, so
@@ -416,32 +410,18 @@ leaving out the snoozed and settled threads; after `f`, only this session's.
 `ksesh agent next` skips snoozed and settled threads, and so do the tab bar's
 badges and attention strip: you put those away.
 
-Setup: the sidebar needs `listen_on` and the watcher from the
-[Agents](#agents) section, which gives every tab you go to a sidebar while
-it's on. Then add to `kitty.conf` (a background launch only gets kitty's
-socket with `--allow-remote-control`; without it, `ksesh` can't reach kitty):
+`ksesh setup` maps the sidebar's keys (see [Install](#install)). By hand, it
+takes `listen_on`, the watcher from the [Agents](#agents) section, which gives
+every tab you go to a sidebar while it's on, and background launches with
+`--allow-remote-control`, without which `ksesh` can't reach kitty:
 
 ```conf
-map super+b         launch --type=background --allow-remote-control ksesh sidebar toggle
-map super+shift+b   launch --type=background --allow-remote-control ksesh sidebar focus
-map super+ctrl+p    launch --type=background --allow-remote-control ksesh agent pin
-map super+ctrl+s    launch --type=background --allow-remote-control ksesh agent settle
-map super+ctrl+z    launch --type=background --allow-remote-control ksesh agent snooze 1h
-map super+ctrl+w    launch --type=background --allow-remote-control ksesh agent wake
-map super+ctrl+j    launch --type=background --allow-remote-control ksesh sidebar next
-map super+ctrl+k    launch --type=background --allow-remote-control ksesh sidebar prev
-map super+ctrl+1    launch --type=background --allow-remote-control ksesh sidebar goto 1
-map super+ctrl+2    launch --type=background --allow-remote-control ksesh sidebar goto 2
-# …and so on to 9
+map super+b launch --type=background --allow-remote-control ksesh sidebar toggle
 ```
 
-Full-window pickers don't fit in the sidebar. Bind their keys twice, so that
-pressed in the sidebar they open over the window beside it instead:
-
-```conf
-map --when-focus-on 'not var:ksesh_role=sidebar' super+a launch --type=overlay --cwd=current ~/.config/kitty/ksesh-agents-fzf
-map --when-focus-on var:ksesh_role=sidebar super+a launch --type=background --allow-remote-control ksesh sidebar overlay -- ~/.config/kitty/ksesh-agents-fzf
-```
+Full-window pickers don't fit in the sidebar, so their keys are bound twice:
+pressed in the sidebar, they open over the window beside it instead
+(`ksesh sidebar overlay`).
 
 A running sidebar restarts itself into a new build of `ksesh` within a couple
 of seconds of it being installed.

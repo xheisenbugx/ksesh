@@ -132,6 +132,6 @@ refresher=$!
   --bind "alt-b:execute-silent($self pr {1})" \
   --bind "alt-w:execute($self close {1})+reload-sync($self list)" \
   --bind 'ctrl-/:toggle-preview' \
-  --preview-window 'right,60%,~4,follow' \
+  --preview-window 'right,50%,~4,follow' \
   --preview-label ' screen ' \
   --preview 'ksesh agent show {1}' || true
