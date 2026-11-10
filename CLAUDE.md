@@ -23,6 +23,7 @@ ksesh is a port of sesh (a smart terminal session manager written in Go) to kitt
 - `agent/` - Coding agent status (working/waiting/done/error/idle): Claude Code, Codex and Gemini CLI hook mapping (`claude.go`, `codex.go`, `gemini.go`) and installers, next/last selection, hook install into Claude settings. Status lives in kitty user variables on the agent's window (`kitty/agent.go`); `contrib/ksesh_agents.py` draws it in kitty's tab bar and sends notifications
 - `sidebar/` - The thread sidebar (`ksesh sidebar`): a bubbletea TUI in a kitty `tab-dock` window (kitty 0.50+) listing agents as T3 Code-style threads. Sections and the pin/snooze/settle rules are pure functions in `agent/thread.go`; triage state is more user variables on the agent's window. Sidebar windows carry `ksesh_role=sidebar` and are kept out of sessions
 - `threads/` - The thread history: one JSON record per agent conversation in `$XDG_STATE_HOME/ksesh/threads/`, written by `ksesh agent hook`, so threads outlive their windows as closed threads that can be resumed. `threads.Kitty` wraps the kitty backend for the sidebar, adding closed threads to `ListAgents`
+- `setup/` - `ksesh setup` (`seshcli/setup.go`): installs kitty's side next to kitty.conf from the files `contrib/embed.go` embeds, writes `ksesh.conf` from `contrib/ksesh.conf.tmpl` with this machine's paths and includes it at the end of kitty.conf. `ksesh-setup.json` there records what it wrote, so a file the user changed is backed up before being replaced. `just install` builds and runs it
 - `contrib/ksesh_snapshot.py` - Loaded by the watcher: kitty writes its `ls` state to `$XDG_STATE_HOME/ksesh/kitty-<pid>.json` on every relevant event, and sidebars read that (`kitty/snapshot.go`) instead of polling `kitten @ ls`
 - `sessionfile/` - Finds kitty session files (the tmuxinator counterpart)
 - `zoxide/` - Frecency backend integration
@@ -46,7 +47,8 @@ The `namer` package determines session names using a strategy chain:
 
 ### Using justfile (preferred)
 ```bash
-just build          # Build to $GOPATH/bin/sesh
+just install        # Build to ~/.local/bin/ksesh and run ksesh setup (kitty config, hooks)
+just build          # Build to $GOPATH/bin/ksesh
 just build v2.0.0   # Build with specific version
 just test           # Run tests with coverage (regenerates mocks first)
 just mock           # Generate mocks only

@@ -33,6 +33,7 @@ func NewRootCommand(version string) *cobra.Command {
 		NewWorktreeCommand(base),
 		NewAgentCommand(base),
 		NewSidebarCommand(base),
+		NewSetupCommand(),
 	)
 
 	return rootCmd
