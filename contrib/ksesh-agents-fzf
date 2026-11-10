@@ -114,9 +114,9 @@ refresher=$!
 
 "$self" list | fzf \
   --listen="$sock" --id-nth 1 \
-  --ansi --no-sort --layout reverse --delimiter '\t' --with-nth 3 \
-  --border rounded --border-label ' agents ' --info inline-right \
-  --prompt '› ' --ghost 'filter by session, title or message' \
+  --ansi --no-sort --layout reverse --delimiter '\t' --with-nth 3.. --tabstop 1 \
+  --nth 1 --border rounded --border-label ' agents ' --info inline-right \
+  --prompt '› ' --ghost 'filter by status, session or tab' \
   --footer 'esc quit' \
   --bind "focus:transform-footer($self footer {2})" \
   --bind "result:transform-footer($self footer {2})" \

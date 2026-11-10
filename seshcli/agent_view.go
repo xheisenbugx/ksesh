@@ -23,8 +23,11 @@ const maxWhere = 44
 //	waiting   backend › claude          4m  Needs permission: Bash
 //
 // With color the icon and status are colored by status and idle rows are
-// dimmed, with no status word: the gray circle says it.
-func agentRows(agents []*model.Agent, now time.Time, color bool) []string {
+// dimmed, with no status word: the gray circle says it. sep goes between the
+// "session › tab" column and the age: two spaces, or for fzf a tab and a
+// space, so the picker can search the status, session and tab and leave the
+// message out of it.
+func agentRows(agents []*model.Agent, now time.Time, color bool, sep string) []string {
 	width := 0
 	wheres := make([]string, len(agents))
 	for i, a := range agents {
@@ -58,7 +61,7 @@ func agentRows(agents []*model.Agent, now time.Time, color bool) []string {
 		if a.Since != nil {
 			age = Age(a.Since, now)
 		}
-		rest := strings.TrimRight(fmt.Sprintf("  %s  %3s  %s", pad(wheres[i], width), age, agentDetail(a)), " ")
+		rest := strings.TrimRight(fmt.Sprintf("  %s%s%3s  %s", pad(wheres[i], width), sep, age, agentDetail(a)), " ")
 		switch {
 		case color && status == agent.Idle:
 			rows[i] = "\033[2m" + head + rest + "\033[22m"
