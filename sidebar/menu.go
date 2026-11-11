@@ -1,9 +1,12 @@
 package sidebar
 
 import (
-	"charm.land/bubbles/v2/key"
+	"cmp"
+	"slices"
 	"strconv"
 	"strings"
+
+	"charm.land/bubbles/v2/key"
 
 	tea "charm.land/bubbletea/v2"
 
@@ -14,22 +17,29 @@ import (
 
 // Icons of the actions on a thread, in its menu and on its buttons.
 const (
-	iconGo        = "" // arrow right
-	iconWake      = "" // sun
-	iconRestore   = "" // undo
-	iconApprove   = "" // check
-	iconDeny      = "" // times
-	iconInterrupt = "" // stop
-	iconReply     = "" // reply
-	iconRename    = "" // pencil
-	iconReview    = "" // eye
-	iconNew       = "" // plus
-	iconBranch    = "" // code fork
-	iconClose     = "" // window close
-	iconUp        = "" // arrow up
-	iconDown      = "" // arrow down
-	iconResume    = "" // play
-	iconForget    = "" // trash
+	iconGo        = ""      // arrow right
+	iconWake      = ""      // sun
+	iconRestore   = ""      // undo
+	iconApprove   = ""      // check
+	iconDeny      = ""      // times
+	iconInterrupt = ""      // stop
+	iconReply     = ""      // reply
+	iconRename    = ""      // pencil
+	iconReview    = ""      // eye
+	iconNew       = ""      // plus
+	iconBranch    = ""      // code fork
+	iconClose     = ""      // window close
+	iconUp        = ""      // arrow up
+	iconDown      = ""      // arrow down
+	iconResume    = ""      // play
+	iconForget    = ""      // trash
+	iconMore      = "\uf141" // ellipsis
+	iconFilter    = "\uf0b0" // filter
+	iconGroup     = "\uf247" // object group
+	iconScope     = "\uf05b" // crosshairs
+	iconWidth     = "\uf07e" // arrows horizontal
+	iconKeys      = "\uf11c" // keyboard
+	iconHide      = "\uf070" // eye slash
 )
 
 // action is something to do to a thread, from its menu or one of its
@@ -155,7 +165,7 @@ func (m Model) threadMenu(a *model.Agent) []action {
 	if m.opts.Run != nil && a.Path != "" {
 		items = append(items, byAct(iconBranch, "New in a worktree…", actNewWorktree))
 	}
-	items = append(items, separator)
+	items = append(items, m.moreAction(), separator)
 	closeIt := byAct(iconClose, "Close window…", actClose)
 	closeIt.danger = true
 	items = append(items, closeIt)
@@ -163,6 +173,57 @@ func (m Model) threadMenu(a *model.Agent) []action {
 		archive := byAct(iconSettle, "Archive worktree…", actArchive)
 		archive.danger = true
 		items = append(items, archive)
+	}
+	return items
+}
+
+// moreAction opens what isn't about a thread, viewMenu, in place of the
+// menu it is in.
+func (m Model) moreAction() action {
+	return action{icon: iconMore, label: m.chrome(), hint: "›", run: func(m Model) (tea.Model, tea.Cmd) {
+		return m.openMenu(m.chrome(), m.viewMenu(), m.menu.x, m.menu.y-1), nil
+	}}
+}
+
+// viewMenu is what can be done that isn't about one thread: what the
+// sidebar or the picker shows, and how. It is the actions menu when no
+// thread is selected.
+//
+//	╭─ Sidebar ────────────╮
+//	│  New thread…      n │
+//	│  Undo             u │
+//	├──────────────────────┤
+//	│  Filter…          / │
+//	│  Group by session o │
+//	│  This session     f │
+//	│  Narrower         < │
+//	│  Wider            > │
+//	├──────────────────────┤
+//	│  Keys             ? │
+//	│  Hide sidebars    q │
+//	╰──────────────────────╯
+func (m Model) viewMenu() []action {
+	items := []action{byAct(iconNew, "New thread…", actNew), byAct(iconRestore, "Undo", actUndo), separator}
+	if !m.opts.Picker {
+		items = append(items, byAct(iconFilter, "Filter…", actFilter))
+	}
+	group := byAct(iconGroup, "Group by session", actGroup)
+	if m.state.Group {
+		group.label = "Ungroup"
+	}
+	scope := byAct(iconScope, "This session only", actScope)
+	if m.state.Session {
+		scope.label = "All sessions"
+	}
+	items = append(items, group, scope)
+	if !m.opts.Picker {
+		items = append(items, byAct(iconWidth, "Narrower", actNarrow), byAct(iconWidth, "Wider", actWiden))
+	}
+	items = append(items, separator, byAct(iconKeys, "Keys", actHelp))
+	if !m.opts.Picker {
+		hide := byAct(iconHide, "Hide sidebars", actHide)
+		hide.danger = true
+		items = append(items, hide)
 	}
 	return items
 }
@@ -228,7 +289,7 @@ func (m Model) openMenu(title string, items []action, x, y int) Model {
 }
 
 // right is what a menu shows at the right of an action: its hint, or the
-// keys that do it.
+// key that does it in the menu, its sidebar letter in the picker too.
 func (m Model) right(a action) string {
 	switch {
 	case a.hint != "":
@@ -236,7 +297,21 @@ func (m Model) right(a action) string {
 	case a.key != "":
 		return a.key
 	}
-	return m.keys.label(a.do)
+	return cmp.Or(m.letters.label(a.do), m.keys.label(a.do))
+}
+
+// does tells whether a key press is the one for an act in a menu: its
+// letter, or its own key in the picker.
+func (m Model) does(msg tea.KeyPressMsg, a act) bool {
+	if a == actNone {
+		return false
+	}
+	for _, keys := range []keyMap{m.letters, m.keys} {
+		if b, ok := keys[a]; ok && key.Matches(msg, b) {
+			return true
+		}
+	}
+	return false
 }
 
 // menuItems are actions as a card draws them.
@@ -265,15 +340,16 @@ func (m Model) keyMenu(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			}
 		}
 	}
+	// q closes the menu unless an action of it hides the sidebars.
+	hides := slices.ContainsFunc(m.menu.items, func(it action) bool { return it.do == actHide })
 	switch k := msg.String(); {
-	case k == "j" && !m.opts.Picker, k == "down", k == "ctrl+n", k == "tab":
+	case k == "j", k == "down", k == "ctrl+n", k == "tab":
 		step(1)
-	case k == "k" && !m.opts.Picker, k == "up", k == "ctrl+p", k == "shift+tab":
+	case k == "k", k == "up", k == "ctrl+p", k == "shift+tab":
 		step(-1)
-	case k == "enter", k == "space", k == "right", k == "l" && !m.opts.Picker:
+	case k == "enter", k == "space", k == "right", k == "l":
 		return m.pick(m.menu.idx)
-	case k == "esc", k == "left", key.Matches(msg, m.keys[actMenu]),
-		!m.opts.Picker && (k == "q" || k == "h"):
+	case k == "esc", k == "left", k == "h", key.Matches(msg, m.keys[actMenu]), k == "q" && !hides:
 		m.mode, m.menu = modeNormal, popup{}
 	default:
 		for i, it := range m.menu.items {
@@ -283,7 +359,7 @@ func (m Model) keyMenu(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			if it.key != "" && it.key == k {
 				return m.pick(i)
 			}
-			if b, ok := m.keys[it.do]; ok && it.key == "" && it.do != actNone && key.Matches(msg, b) {
+			if it.key == "" && m.does(msg, it.do) {
 				return m.pick(i)
 			}
 		}

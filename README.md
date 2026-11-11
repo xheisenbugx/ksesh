@@ -245,8 +245,12 @@ beside the list (it's the screenshot at the top of this page). Type to filter (f
 | `alt+p` `alt+s` `alt+z` `alt+e` | pin, settle, snooze, wake                     |
 | `alt+b`                         | open its pull request                         |
 | `alt+w`                         | close its window                              |
-| `alt+m`                         | its menu                                      |
+| `alt+space` / `alt+m`           | its actions, by the sidebar's letters         |
 | `f1`                            | every key                                     |
+
+The actions menu takes the sidebar's letters (`a` approves, `p` pins, `d`
+reviews…), so you only need to learn one set of keys: `space` then a
+letter in the sidebar, `alt+space` then the same letter here.
 
 It lists the same threads as the sidebar. Snoozed and settled ones start
 folded away, and open as soon as you type, so they're always a search away.
@@ -318,12 +322,17 @@ and its thread stays in Settled as a *closed* thread. `enter` resumes it with
 | `R`                     | rename the thread                                      |
 | `X`                     | close its window (or forget a closed thread)           |
 | `A`                     | archive it: remove its worktree, branch and session    |
-| `m` / right click       | everything you can do to it, as a menu                 |
+| `space` / `m` / right click | everything you can do to it, as a menu          |
 | `/`                     | filter                                                 |
 | `o` / `f`               | group the inbox by session / only this session         |
 | `<` `>`                 | narrower, wider                                        |
 | `q`                     | hide the sidebar everywhere                            |
 | `?`                     | every key                                              |
+
+The footer shows the keys for the selected thread's state: approve, deny
+and reply when it is waiting, review and its PR when it is done, and `m
+more` for the rest, the sidebar's own options (group, scope, width, hide)
+among them.
 
 The mouse works too: hover a thread for pin, snooze and settle buttons, and
 click its `#12` to open its pull request.
