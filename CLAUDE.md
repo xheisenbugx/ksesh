@@ -70,8 +70,9 @@ just mock
 
 ## Configuration
 
-- Config file: `$XDG_CONFIG_HOME/sesh/sesh.toml` or `~/.config/sesh/sesh.toml`
-- Custom path: `sesh --config /path/to/sesh.toml <command>`
+- Config file: `$XDG_CONFIG_HOME/ksesh/ksesh.toml` (`~/.config/ksesh/ksesh.toml`); only when it is missing, sesh's `sesh/sesh.toml`. The two are never merged
+- Custom path: `ksesh --config /path/to/ksesh.toml <command>` (`-C`)
+- Schema: `ksesh.schema.json`; keep it in step with `model/config.go`
 - Test config examples: `configurator/testdata/`
 
 ## Development Notes

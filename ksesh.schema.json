@@ -281,6 +281,20 @@
       },
       "additionalProperties": false
     },
+    "picker": {
+      "type": "object",
+      "description": "The agent picker (`ksesh agent pick`, cmd+a).",
+      "properties": {
+        "open_shelves": {
+          "type": "array",
+          "items": { "type": "string", "enum": ["working", "snoozed", "settled"] },
+          "uniqueItems": true,
+          "default": ["working"],
+          "description": "The shelves the picker opens with. An empty list keeps them all closed. Typing a filter opens every shelf until it is cleared."
+        }
+      },
+      "additionalProperties": false
+    },
     "default_session": {
       "type": "object",
       "description": "Default settings applied to all sessions",

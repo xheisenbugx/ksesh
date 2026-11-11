@@ -1,565 +1,423 @@
-# ksesh — sesh for kitty
+# ksesh
 
-`ksesh` is a port of [sesh](https://github.com/joshmedeski/sesh), the smart
-terminal session manager, that uses **kitty's native sessions** instead of tmux.
-It keeps sesh's features (zoxide integration, the picker TUI, config sessions,
-startup commands, windows, wildcards, aliases, git worktrees, previews, caching),
-but every session it creates or switches to is a real kitty session, so kitty's
-own `goto_session`, `tab_bar_filter session:…` and `{session_name}` work with
-them too.
+**A smart session manager for [kitty](https://sw.kovidgoyal.net/kitty/), with a home for your coding agents.**
 
-Requires kitty **0.43+** (sessions were introduced in 0.43; the thread
-sidebar needs **0.50+**) and `zoxide`. `git` and `gh` light up worktrees and
-pull requests; `fzf` is only needed for the fzf pickers in `contrib/`.
+ksesh is a port of [sesh](https://github.com/joshmedeski/sesh) that uses
+**kitty's own sessions** instead of tmux. Jump to any project with a fuzzy
+picker, and keep track of every Claude Code, Codex or Gemini CLI agent you
+have running, from a sidebar in every tab.
 
-## How sesh concepts map onto kitty
+```
+ Threads ╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱
+ all sessions · 6                1  1
 
-| sesh / tmux              | ksesh / kitty                                                                 |
-| ------------------------ | ----------------------------------------------------------------------------- |
-| tmux session             | kitty session: the windows kitty tags with the same `session_name`            |
-| tmux window              | kitty tab in that session (`ksesh tab …`, alias `ksesh window …`)              |
-| tmux pane                | kitty window (`ksesh list -p`)                                                 |
-| `tmux new-session`       | `kitten @ launch --type=tab --add-to-session NAME --cwd DIR`                   |
-| `tmux switch-client`     | `goto_session` (so kitty's session history and `goto_session -1` follow)       |
-| `send-keys` startup cmd  | `kitten @ send-text` into the session's first window                           |
-| `capture-pane` preview   | `kitten @ get-text --ansi`                                                    |
-| `kill-session`           | closes every window of the session                                             |
-| tmuxinator projects      | kitty session files (`*.kitty-session`) in `session_file_dirs`                 |
-| attached session         | the session of the kitty window ksesh runs in (or the focused one, outside)   |
+  PINNED ──────────────────────── 1
+   Refactor auth                1h
+    api · › split the session store
 
-## Install
+  INBOX ───────────────────────── 2
+▌  Fix the login redirect       2m ●
+▌   api · Allow Bash: npm test
+   Write the README             5m
+    docs · Added a Threads section
+
+ ────────────────────────────────────
+ ▸ ⠹ Working                        2
+ ▸  Snoozed                        1
+ ▸  Settled                        9
+ ────────────────────────────────────
+ a approve · x deny · r reply · ? keys
+```
+
+## What you get
+
+- **Sessions without tmux.** Every session ksesh opens is a real kitty
+  session, so kitty's own `goto_session`, `tab_bar_filter session:…` and
+  `{session_name}` work with it.
+- **A fuzzy session picker** (`cmd+p`) over your running sessions, configured
+  projects, kitty session files and zoxide directories, with a live preview.
+- **Agent status everywhere.** Each agent shows whether it is working, waiting
+  on you, done or failed: in the tab bar, in desktop notifications, and in the
+  pickers.
+- **A thread sidebar** (`cmd+b`) that triages your agents the way
+  [T3 Code](https://github.com/pingdotgg/t3code) triages threads: pin, snooze
+  and settle them, see their branch and pull request, and approve, deny or
+  reply without leaving the window you're in.
+- **An agent picker** (`cmd+a`) with each agent's screen, or its diff, beside
+  the list.
+- **Git worktrees as sessions**, with an agent already started in them.
+- **All of sesh's features**: zoxide, config sessions, startup commands,
+  windows, wildcards, aliases, previews and caching. Your `sesh.toml` works as
+  is.
+
+## Contents
+
+- [Requirements](#requirements)
+- [Quick start](#quick-start)
+- [Keys](#keys)
+- [Sessions](#sessions)
+- [Agents](#agents)
+- [The thread sidebar](#the-thread-sidebar)
+- [Worktrees](#worktrees)
+- [Configuration](#configuration)
+- [Coming from sesh](#coming-from-sesh)
+- [Troubleshooting](#troubleshooting)
+- [How it works](#how-it-works)
+- [Development](#development)
+
+## Requirements
+
+| what                                    | needed for                                 |
+| --------------------------------------- | ------------------------------------------ |
+| [kitty](https://sw.kovidgoyal.net/kitty/) **0.43+** | sessions (**0.50+** for the sidebar) |
+| [zoxide](https://github.com/ajeetdsouza/zoxide)     | directories you use, in the picker   |
+| [Go](https://go.dev) 1.26 and [just](https://github.com/casey/just) | building ksesh |
+| `git` (optional)                        | worktrees, branches in the sidebar         |
+| [`gh`](https://cli.github.com) (optional) | pull requests in the sidebar and `ksesh wt` |
+| [delta](https://github.com/dandavison/delta) (optional) | syntax highlighted diffs   |
+
+## Quick start
 
 ```sh
 git clone https://github.com/xheisenbugx/ksesh && cd ksesh
 just install
 ```
 
-`just install` builds `ksesh` into `~/.local/bin` (`KSESH_BIN` to change it)
-and runs `ksesh setup`, which sets kitty up the same way on every machine:
+That builds `ksesh` into `~/.local/bin` and runs `ksesh setup`, which wires
+kitty up for you:
 
-- next to `kitty.conf`: the watcher, tab bar and pickers from
-  [`contrib/`](contrib), and `ksesh.conf`, ksesh's kitty settings and keys
-  (from [`contrib/ksesh.conf.tmpl`](contrib/ksesh.conf.tmpl)), written with
-  this machine's paths: where `ksesh` is and your shell's `PATH`, which kitty
-  started from the Dock or a launcher doesn't have;
-- at the end of `kitty.conf`, `include ksesh.conf`;
-- `sessions/main.kitty-session`, the session kitty starts in, if you have none;
-- the hooks that report Claude Code's status (when it's installed);
-  `just install --codex` and `--gemini` add Codex's and Gemini CLI's;
-- inside kitty, it reloads kitty's config, watcher and tab bar. The first time,
-  quit and start kitty again: kitty only opens ksesh's socket (`listen_on`) at
-  start.
+- it writes `ksesh.conf` (ksesh's kitty settings and keys) next to your
+  `kitty.conf`, and includes it at the end of `kitty.conf`;
+- it installs the tab bar, watcher and pickers next to them;
+- it adds `sessions/main.kitty-session`, the session kitty starts in, if you
+  don't have one;
+- it installs the hooks that report Claude Code's status. Add
+  `just install --codex` or `--gemini` for those agents.
 
-Without `just`: `go build -o ~/.local/bin/ksesh . && ~/.local/bin/ksesh setup`.
-To update, `git pull && just install`: setup only changes what is out of date.
-A file you changed by hand is kept as `<file>.ksesh-<time>.bak` before it is
-replaced, and so is `kitty.conf` whenever setup edits it. `ksesh setup
---dry-run` says what it would change; `ksesh setup --uninstall` takes it all out
-again.
+**The first time, quit kitty and start it again**: kitty only opens the socket
+ksesh talks to when it starts. After that, setup reloads kitty itself.
 
-The keys it maps (cmd is `super`):
+Then try it:
 
-| key                  | does                                                       |
-| -------------------- | ---------------------------------------------------------- |
-| `cmd+p`              | session picker (`ksesh picker`)                            |
-| `cmd+shift+p`        | back to the previous session                               |
-| `cmd+shift+r`        | rename the session                                         |
-| `cmd+a`              | agent picker (`ksesh agent pick`)                          |
-| `cmd+j`, `cmd+shift+j` | the agent that needs you next, the one before            |
-| `cmd+b`              | show or hide the thread sidebar in every tab               |
-| `cmd+shift+b`        | into the tab's sidebar and back out                        |
-| `cmd+ctrl+p` `s` `z` `w` | pin, settle, snooze an hour, wake the thread you're in |
-| `cmd+ctrl+j`, `k`, `1`–`9` | next, previous, nth thread in the sidebar          |
-| `cmd+t`, `cmd+enter` | new tab, new window, in the session you're in              |
+1. Press **`cmd+p`** and pick a project. ksesh opens it as a session.
+2. Start an agent in it (`claude`) and press **`cmd+b`** to see it in the
+   sidebar.
+3. When an agent waits on you, press **`cmd+j`** to jump to it, or approve it
+   from the sidebar with **`a`**.
+
+To update later: `git pull && just install`. Setup only changes what is out of
+date, and keeps a `.bak` of any file you edited by hand before replacing it.
+`ksesh setup --dry-run` shows what it would change, and
+`ksesh setup --uninstall` takes it all out again.
+
+<details>
+<summary>Without <code>just</code></summary>
+
+```sh
+go build -o ~/.local/bin/ksesh . && ~/.local/bin/ksesh setup
+```
+
+`KSESH_BIN` changes where `just install` puts the binary.
+</details>
+
+## Keys
+
+`ksesh setup` maps these (`cmd` is kitty's `super`):
+
+| key                          | does                                           |
+| ---------------------------- | ---------------------------------------------- |
+| `cmd+p`                      | session picker                                 |
+| `cmd+shift+p`                | back to the previous session                   |
+| `cmd+shift+r`                | rename the session                             |
+| `cmd+a`                      | agent picker                                   |
+| `cmd+j` / `cmd+shift+j`      | the agent that needs you next / the one before |
+| `cmd+b`                      | show or hide the sidebar in every tab          |
+| `cmd+shift+b`                | into the tab's sidebar and back out            |
+| `cmd+ctrl+p` `s` `z` `w`     | pin, settle, snooze for an hour, wake the thread you're in |
+| `cmd+ctrl+j` / `k` / `1`–`9` | next, previous, nth thread of the sidebar      |
+| `cmd+t` / `cmd+enter`        | new tab / new window in the session you're in  |
 
 Pressed in the sidebar, `cmd+p` and `cmd+a` open over the window beside it.
-To change a key or a setting of `ksesh.conf`, put yours in
-`ksesh-local.conf`, next to it: kitty reads it after `ksesh.conf`, which
-`ksesh setup` writes again on every run. For instance, on Linux:
+
+**To change a key**, put yours in `ksesh-local.conf`, next to `ksesh.conf`.
+kitty reads it last, and `ksesh setup` never touches it. For instance, on
+Linux:
 
 ```conf
 map ctrl+alt+b launch --type=background --allow-remote-control ksesh sidebar toggle
 ```
 
-Without `listen_on`, ksesh still works from inside kitty with
-`allow_remote_control yes`: it then talks to kitty through the terminal, and the
-picker snapshots kitty before it draws (previews included) and defers `ctrl+x`
-kills until it closes, since a TUI and `kitten @` can't share the tty.
-
-## Usage
+## Sessions
 
 Everything from sesh works the same way; only the multiplexer changed.
 
 ```sh
+ksesh connect <name|dir>   # switch to a session, creating it when needed
+ksesh picker -i --preview  # the session picker (cmd+p)
+ksesh last                 # the session you were in before this one
 ksesh list                 # sessions from kitty, config, session files and zoxide
 ksesh list -t              # only running kitty sessions (-c config, -T session files, -z zoxide)
-ksesh list -i --json       # icons / JSON, as in sesh
-ksesh connect <name|dir>   # switch to it, creating it when needed
-ksesh picker -i --preview  # the session picker TUI
-ksesh last                 # the session you were in before this one
-ksesh preview <name>       # live screen of a session, or a directory listing
-ksesh root                 # root of the current session
-ksesh kill <name>          # kill a session (the attached one without a name)
-ksesh mkdir <path>         # mkdir + connect
-ksesh clone <repo>         # git clone + connect
-ksesh rename --to <name>   # rename the current session (or: ksesh rename <session> --to …)
-ksesh rename --enrich      # add the GitHub issue title, as in sesh
-ksesh tab list             # tabs of the current session (-t <session> for another)
+ksesh kill [name]          # close a session's windows (the current one without a name)
+ksesh rename --to <name>   # rename the current session
+ksesh mkdir <path>         # mkdir, then connect
+ksesh clone <repo>         # git clone, then connect
+ksesh preview <name>       # a session's screen, or a directory listing
 ksesh tab connect logs     # select the "logs" tab, creating it if missing
 ksesh tab connect ~/c/api -c 'npm run dev'
-ksesh list -p              # kitty windows of the current session
-ksesh worktree connect 42  # git worktree for issue/PR #42 as a session
-ksesh wt new feat/login    # git worktree for a branch as a session (see Worktrees)
-ksesh agent next           # jump to the agent that needs you (see Agents)
 ```
 
-With fzf instead of the built-in picker:
+### The session picker
+
+`cmd+p` lists everything (`sort_order` sets the order). Type to filter, then:
+
+| key                            | does                                         |
+| ------------------------------ | -------------------------------------------- |
+| `enter`                        | go to the session                            |
+| `ctrl+a` `t` `g` `s` `z`       | show all, kitty sessions, configs, session files, zoxide |
+| `ctrl+x`                       | kill the session, or forget a zoxide directory |
+| `ctrl+o`                       | show or hide the preview                     |
+| `esc`                          | quit                                         |
+
+A session with an agent shows the agent's status in place of its icon, and
+sessions that need you are listed first.
+
+Prefer fzf? [`contrib/ksesh-fzf`](contrib/ksesh-fzf) is installed next to
+`ksesh.conf`; bind it in `ksesh-local.conf`. Or simply:
 
 ```sh
 ksesh connect "$(ksesh list -i | fzf --ansi --no-sort)"
 ```
 
-The picker, `ksesh picker`, is sesh's, drawn the way the sidebar is: the
-same masthead, colors mixed from your terminal's own, a bar on the selected
-row and the keys for it at the bottom. Without `-c`, `-t`, `-z` or `-T` it
-lists everything, and switches source as you go: `^a` all, `^t` kitty
-sessions, `^g` configs, `^s` session files, `^z` zoxide. `^x` kills the
-highlighted session (or forgets a zoxide directory), `^o` shows or hides the
-preview. `--zoom` gives it the whole tab while it is open, in a tab split
-into several windows (the `stack` layout), as `ksesh setup` maps it to
-`cmd+p`.
+### Outside kitty
 
-[`contrib/ksesh-fzf`](contrib/ksesh-fzf), the kitty version of sesh's
-fzf-tmux popup binding, is still installed next to `ksesh.conf` for those who
-would rather have fzf: `^a` all, `^t` kitty sessions, `^g` configs, `^s`
-session files, `^x` zoxide, `^f` find directories (needs `fd`), `^d` kill.
-Bind it in `ksesh-local.conf` to put it back on `cmd+p`.
-
-`ksesh kill [name]` closes every window of a session (the attached one without
-a name); like `connect`, it accepts a line from `ksesh list -i` as is.
-
-Running ksesh **outside kitty**: it reaches kitty through `$KITTY_LISTEN_ON` or
-the `kitty_socket` option and brings kitty to the front after switching. When no
-kitty can be reached at all, `ksesh connect` starts one (the equivalent of sesh
-starting the tmux server).
+ksesh also works from another terminal or a launcher: it reaches kitty through
+`$KITTY_LISTEN_ON` or the `kitty_socket` option, and brings kitty to the front
+after switching. If no kitty is running, `ksesh connect` starts one.
 
 ## Agents
 
 ksesh tracks the coding agents running in kitty, so you can see at a glance
-which one needs you and jump straight to it, without tmux.
+which one needs you and go straight to it.
 
-Each agent reports its status on its own kitty window as user variables
-(`ksesh_status` = `working`, `waiting`, `done`, `error` or `idle`, plus
-`ksesh_msg`, `ksesh_prompt`, `ksesh_status_at` and `ksesh_turn_at`), set by
-`ksesh agent hook` from the agent's own hooks, which `ksesh agent install` adds
-for you, keeping your other settings and hooks (the file it changes is backed
-up next to it, and `ksesh agent uninstall` takes them out again):
+### Setting up an agent
 
-| agent       | install                        | working                                    | waiting                     | done               | error                |
-| ----------- | ------------------------------ | ------------------------------------------ | --------------------------- | ------------------ | -------------------- |
-| Claude Code | `ksesh agent install`          | prompt submitted, tool ran                 | permission prompt, question | stop               | API failure          |
-| Codex       | `ksesh agent install --codex`  | prompt submitted, tool ran, model answered | approval request            | stop (or `notify`) | model request failed |
-| Gemini CLI  | `ksesh agent install --gemini` | prompt submitted, tool started             | tool confirmation           | agent finished     | (no event for it)    |
-
-`--all` installs all three. A permission prompt's message says what it would
-allow (`Allow Bash: npm test`, `Allow shell: npm test`, `Allow edit:
-src/main.go`, `Allow network: github.com`), so you can answer it from the
-picker without looking at the agent.
-
-- **Claude Code**: hooks in `~/.claude/settings.json` (or `--settings`).
-- **Codex**: hooks in `~/.codex/hooks.json` (`$CODEX_HOME`, or
-  `--codex-home`), or, when your `config.toml` already defines `[hooks]` of its
-  own, in a marked block at its end, since Codex warns when one folder has both.
-  Codex only runs a hook you trusted: after installing, open `/hooks` in Codex
-  and trust ksesh's (once; reinstalling the same binary keeps them trusted).
-  Your `notify` program is left alone: the hooks report everything it would.
-  On a Codex too old for hooks, set `notify = ["ksesh", "agent", "hook",
-  "--agent", "codex"]` yourself for "done".
-- **Gemini CLI**: hooks in `~/.gemini/settings.json` (or `--gemini-settings`).
-  ksesh can't edit a `settings.json` with comments in it.
-
-Other agents can call `ksesh agent set waiting -m "…"` from their own hooks;
-agents without any (aider, opencode, …) are still listed, as idle, by their
-program.
+`just install` already sets up Claude Code. For the others:
 
 ```sh
-ksesh agent install          # Claude Code hooks (uninstall removes them)
-ksesh agent install --codex  # or --gemini, or --all
-ksesh agent list             # every agent, the ones that need you first
-ksesh agent list -A          # only waiting, failed or done
-ksesh agent next             # go to the one waiting longest; again for the next
-ksesh agent last             # back to the agent you were with before
-ksesh agent set done -m "…"  # report a status by hand or from another agent
-ksesh agent send 42 --key enter --if-status waiting  # approve without switching
-ksesh agent send 42 "use the existing helper"         # reply without switching
-ksesh agent show 42          # status, branch, changes and screen of window 42
-ksesh agent diff 42          # review it: branch vs base, commits, files, diff
+ksesh agent install --codex    # or --gemini, or --all
 ```
 
-`ksesh agent diff` reviews the agent's worktree the way its branch will be
-reviewed: everything since it left its base (origin's default branch), so
-commits, uncommitted changes and new files alike, with the files not committed
-yet marked `●`. The diff is drawn with line numbers and tinted backgrounds, and
-goes through [delta](https://github.com/dandavison/delta) instead when it is
-installed. `--pager` pages it in `less`.
+| agent       | working                         | waiting                     | done           | error       |
+| ----------- | ------------------------------- | --------------------------- | -------------- | ----------- |
+| Claude Code | prompt sent, tool ran           | permission prompt, question | stop           | API failure |
+| Codex       | prompt sent, tool ran, answered | approval request            | stop           | request failed |
+| Gemini CLI  | prompt sent, tool started       | tool confirmation           | agent finished | —           |
 
-`ksesh agent pick` (`cmd+a`) is the sidebar's list of threads as a full
-window picker, with the selected thread's screen, or its review, beside it.
-Typing filters (fzf style: `lgn` finds `login`); `enter` goes to the thread,
-or resumes a closed one, and quits. The rest are ctrl and alt keys, and the
-status bar only shows those that do something for the selected thread:
+ksesh adds its hooks next to yours and backs up the file it changes;
+`ksesh agent uninstall` removes them.
 
-| key      | does                                                    |
-| -------- | ------------------------------------------------------- |
-| `enter`  | go to the thread, or resume a closed one                |
-| `ctrl+y` | approve: enter in a waiting agent's permission prompt   |
-| `ctrl+x` | interrupt a working agent, deny a waiting one (escape)  |
-| `ctrl+o` | reply: type a message and send it                       |
-| `ctrl+s` | mark a finished agent seen (back to idle)               |
-| `ctrl+g` | preview the review (`ksesh agent diff`) instead of the screen, and back; files with hundreds of changed lines are folded |
-| `alt+d`  | the full review in `less`, nothing folded               |
-| `ctrl+d` | scroll the preview half a page down (`ctrl+u` up)       |
-| `alt+p` `alt+s` `alt+z` `alt+e` | pin, settle, snooze, wake        |
-| `alt+b`  | open the branch's pull request                          |
-| `alt+w`  | close the agent's window (asks first)                   |
-| `alt+m`  | the thread's menu, as in the sidebar                    |
-| `f1`     | every key                                               |
+- **Claude Code**: `~/.claude/settings.json` (or `--settings`).
+- **Codex**: `~/.codex/hooks.json` (`$CODEX_HOME`, or `--codex-home`). Codex
+  only runs hooks you trust, so **open `/hooks` in Codex once and trust
+  ksesh's**. If your `config.toml` already has a `[hooks]` table, ksesh adds a
+  marked block at its end instead.
+- **Gemini CLI**: `~/.gemini/settings.json` (or `--gemini-settings`). ksesh
+  can't edit a `settings.json` with comments in it.
+- **Anything else** can report its status with `ksesh agent set waiting -m "…"`
+  from its own hooks. Agents without hooks (aider, opencode, …) are still
+  listed, as idle.
 
-The screen follows the agent's bottom unless you scroll up, under a header
-that stays: its status, where it runs, its branch and changes. The list is
-the sidebar's, sections and shelves included. It opens with only Working
-open; typing a filter opens every shelf, so snoozed and settled threads are a
-search away, and clearing it closes them again. `enter` on a shelf opens or
-closes it, without touching the sidebars'. Which shelves it opens with is
-set in `ksesh.toml`:
+### Where you see it
 
-```toml
-[picker]
-open_shelves = ["working"]  # any of "working", "snoozed", "settled"; [] keeps them all closed
-``` [`contrib/ksesh-agents-fzf`](contrib/ksesh-agents-fzf), the
-fzf picker it replaces, is still installed next to `ksesh.conf`.
+- **In the tab bar**: a status icon on every tab with an agent, and at the
+  right end, an **attention strip** naming the *other* sessions with an agent
+  waiting on you or failed.
+- **As a desktop notification**, when an agent starts waiting, fails or
+  finishes while you aren't looking at it. Clicking it takes you there. Turns
+  shorter than 30 seconds don't notify.
+- **In the pickers and the sidebar**, with what the agent needs: a permission
+  prompt says what it would allow (`Allow Bash: npm test`), so you can answer
+  it without switching.
 
-The status also shows wherever sessions do: `ksesh list -i`, `ksesh-fzf` and
-the pickers draw a session's most urgent agent status in place of its kitty
-icon, and list sessions that need you first.
+A finished agent turns back to idle once you look at its window.
 
-In kitty itself, [`contrib/ksesh_agents.py`](contrib/ksesh_agents.py) adds:
+### The agent picker
 
-- a status icon on each tab with an agent;
-- at the right end of the tab bar, an **attention strip** naming every *other*
-  session with an agent waiting on you or failed. `tab_bar_filter session:.`
-  hides other sessions' tabs, and the strip is how you still see them;
-- a desktop notification when an agent starts waiting, fails or finishes, only
-  if you aren't looking at its window. Clicking it focuses the window, and it
-  goes away on its own once the agent moves on (say you approved it from the
-  picker). A turn that finishes in under 30 seconds doesn't notify;
-- "done" turns back to idle once you focus the agent's window, or right away
-  if it finishes while you're looking at it.
+`cmd+a` opens every agent in a full window, with the selected one's screen
+beside the list. Type to filter (fzf style: `lgn` finds `login`), and:
 
-`ksesh setup` installs it, with the watcher and tab bar it works through, and
-maps `cmd+j` for the next agent that needs you,
-`cmd+shift+j` back to the previous one and `cmd+a` for the agent picker.
+| key                             | does                                          |
+| ------------------------------- | --------------------------------------------- |
+| `enter`                         | go to the agent (or resume a closed thread)   |
+| `ctrl+y`                        | approve a waiting agent                       |
+| `ctrl+x`                        | deny a waiting agent, interrupt a working one |
+| `ctrl+o`                        | reply                                         |
+| `ctrl+s`                        | mark a finished agent seen                    |
+| `ctrl+g`                        | show its diff instead of its screen, and back |
+| `alt+d`                         | the full review, in `less`                    |
+| `ctrl+d` / `ctrl+u`             | scroll the preview                            |
+| `alt+p` `alt+s` `alt+z` `alt+e` | pin, settle, snooze, wake                     |
+| `alt+b`                         | open its pull request                         |
+| `alt+w`                         | close its window                              |
+| `alt+m`                         | its menu                                      |
+| `f1`                            | every key                                     |
 
-kitty reads `tab_bar.py` and watchers once and keeps them until it quits.
-`kitten @ kitten ksesh_reload.py` loads new ones into the running kitty, so
-your sessions don't have to go. `ksesh_agents.py` and `ksesh_snapshot.py`
-themselves are re-read whenever they change. The hooks need `listen_on`:
-without a socket they do nothing rather than talk to kitty over the agent's own
-terminal.
+It lists the same threads as the sidebar. Snoozed and settled ones start
+folded away, and open as soon as you type, so they're always a search away.
 
-## Threads and the sidebar
-
-With many agents going, a list sorted by urgency isn't enough: some you want
-kept in view, some you want out of the way until later, some you are done
-with. ksesh triages agents the way [T3 Code](https://github.com/pingdotgg/t3code)
-triages its threads, and shows them in a **sidebar docked to the left of every
-tab** (kitty 0.50's `launch --type=tab-dock`):
-
-```
- Threads ╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱
- all sessions · 6              1   1   the scope, and what needs you
-
-  PINNED ──────────────────────── 1
-   Refactor auth                1h
-    api · › split the session store
-                                         Pinned  yours, in your order
-  INBOX ───────────────────────── 2     Inbox   the latest activity first
-▌  Fix the login redirect       2m ●   ▌ selected   ● the thread you're in
-▌   api · Allow Bash: npm test
-   Write the README             5m
-    docs · Added a Threads section
-
- ────────────────────────────────────
- ▸ ⠹ Working                        2   agents running that don't need you
- ▸  Snoozed                        1   hidden until a time you picked
- ▸  Settled                        9   done with
- ────────────────────────────────────
- a approve · x deny · r reply · ? keys
-```
-
-The look borrows from [Crush](https://github.com/charmbracelet/crush): a
-gradient masthead running out into stripes, section labels with a rule to
-their count, and a status bar. Its colors are mixed from your terminal's own
-background and foreground, so it suits light and dark themes alike; the
-selected row is tinted with the accent and marked with a bar, the one under
-the mouse is lifted a little.
-
-Each thread shows the title its agent gave it (or the one you gave it with
-`R`, kept in `ksesh_title` and shown by `ksesh agent list` too), how long ago
-it last did something, and under that its session and what it needs, did or
-is on. Titles
-of threads that need you are bold, and a waiting or failed agent's message is
-colored. A thread that finished or failed while you weren't looking is
-**unread**, marked with an accent `•` at its left, until you go to its window
-(the watcher turns "done" idle then, and records when it saw you in
-`ksesh_seen_at`).
-
-At the right of a thread's second line goes the branch it is on, when it is
-one of its own and there is room: its name, how many commits it is ahead `↑`
-and behind `↓` its base (as `ksesh wt status` counts them) and its pull
-request, green when open, gray as a draft, magenta merged and red closed. What
-a waiting or failed agent needs comes first: the branch only shows when both
-fit. The sidebar asks git about it every 30 seconds and GitHub (`gh pr view`)
-every 5 minutes, off its UI, and only while it is on screen; the pull requests
-are cached in `~/.cache/ksesh` for every tab's sidebar to share. Working agents spin, a closed shelf holding the thread you're in shows
-its `●`, and the status bar only offers the keys that do something for the
-selected thread.
-
-Every agent is a thread in exactly one section, the first that applies:
-**Snoozed**, **Settled**, **Pinned**, **Working**, or the inbox. The shelves at
-the bottom start closed. A closed shelf still shows the thread you're on, and
-an open Settled shows ten threads and then a "more" row. Threads also move on
-their own, the way they do in T3 Code:
-
-- **Sending an agent a prompt** un-settles its thread and ends its snooze.
-- **An agent that starts waiting on you or fails** un-settles its thread, and
-  wakes it early if it is snoozed. It is then marked as woken (a magenta clock)
-  until you look at it. Finishing a turn doesn't wake it, so a long job you
-  snoozed stays out of the way.
-- **A thread idle for 7 days settles itself** (`auto_settle_after_days`),
-  unless it is pinned, snoozed, working, waiting or failed, or you took it out
-  of Settled by hand since it last did something.
-- **A thread whose pull request was merged settles itself** once the agent is
-  idle or done, on the same terms. The sidebar does it, since it is what asks
-  GitHub.
-- **Pinning** un-settles and wakes a thread. **Settling** unpins and wakes
-  it, and is refused while the agent is working or waiting on you.
-
-Like the status, all of this lives in user variables on the agent's window
-(`ksesh_pin`, `ksesh_snooze_until`, `ksesh_settled_at`, …), so it needs
-nothing running on the side.
-
-**Threads outlive their windows.** Claude Code names its conversation in every
-hook event, and `ksesh agent hook` keeps a record of each one in
-`~/.local/state/ksesh/threads/<conversation>.json` (`$XDG_STATE_HOME`): where it
-runs, its session, title, last status and its triage state. Close the window,
-exit Claude or quit kitty, and the thread stays in **Settled** as a *closed*
-thread, muted and marked with a history icon, among the settled threads by
-when it last did something. `enter` (or a click, or Resume in its menu)
-resumes it: a new tab in the thread's session, which is started again if it
-is gone, runs `claude --resume <id>` in the directory it ran in. The new window
-is the thread again, still pinned if it was, back out of Settled. `X` forgets
-a closed thread. Agents that don't name their conversation are only threads
-while their window lasts.
-
-In the sidebar:
-
-| key          | does                                                  |
-| ------------ | ----------------------------------------------------- |
-| `enter` `l`  | go to the thread (or open/close a shelf, resume a closed thread), also a click |
-| `esc` `h`    | back to the window you were in                        |
-| `j` `k` `g` `G` `tab` | move; `tab` jumps to the next shelf          |
-| `1`–`9`      | go to the nth thread of the sidebar's order (below)   |
-| `n`          | new thread: asks what to do, then starts the agent (`agent_command`, default `claude`) on it in a new tab of the selected thread's session and directory, also the masthead's `+` |
-| `N`          | new thread in a new worktree: asks for a branch, then what to do, and runs `ksesh wt new <branch> -p …` in the selected thread's repo |
-| `p`          | pin or unpin; `K` `J` move a pin up or down            |
-| `s`          | settle or un-settle                                   |
-| `z`          | snooze: in 1 or 3 hours, this evening, tomorrow 9:00, next Monday 9:00, or `c` for any time (`90m`, `2d`, `15:04`, `2026-12-01 09:00`) |
-| `w`          | wake a snoozed thread, or dismiss the woken mark       |
-| `u`          | undo the last pin, settle, snooze or wake             |
-| `m`          | the thread's menu, also a right click                 |
-| `a` `x` `r`  | approve, deny or interrupt, reply, without switching  |
-| `d`          | review it: `ksesh agent diff --pager` over the window beside the sidebar |
-| `P`          | open its pull request in the browser (or click the `#12` under it) |
-| `R`          | rename the thread; empty goes back to the agent's title |
-| `X`          | close the agent's window, or forget a closed thread (asks first) |
-| `A`          | archive a thread in a worktree of its own: `ksesh wt rm` removes the worktree, its branch and session, then the window closes (asks first; wt rm's refusal of uncommitted changes shows in the status bar) |
-| `/`          | filter by title, session or branch as you type; `enter` keeps it, `esc` clears it |
-| `o`          | group the inbox by session, like T3 Code's projects, and back |
-| `f`          | only this tab's session, or every session             |
-| `<` `>`      | narrow or widen the sidebar by 4 columns; new sidebars open at that width |
-| `q`          | hide the sidebar in every tab                         |
-
-The mouse works too, as in T3 Code. Hover a thread and its time gives way to
-buttons, pin, snooze and settle (wake and settle on a snoozed one, restore on
-a settled one), and the status bar says what the one under the mouse does.
-Right click a thread, or press `m`, for a menu of everything that can be done
-to it; its Snooze opens the times in its place. Below Reply… it also has
-Review changes, Rename…, New thread… and New in a worktree…, and after Close
-window…, for a thread in a worktree of its own, Archive worktree…. The `+` at
-the right end of the masthead starts a new thread too.
-
-```
-  INBOX ───────────────────────── 2
-▌  Write docs                 
-▌   ap╭──────────────────────╮
-      │   Go to thread    ↵ │
-      │   Pin             p │
-      │   Snooze          › │
-      │   Settle          s │
-      ├──────────────────────┤
-      │   Reply…          r │
-      ├──────────────────────┤
-      │   Close window…   X │
-      ╰──────────────────────╯
-```
-
-The same actions work from the command line, on the agent in the current
-window or the one given, so they can be bound in kitty directly:
+### From the command line
 
 ```sh
-ksesh agent pin [window-id]           # toggle
-ksesh agent settle [window-id]        # toggle
-ksesh agent snooze 3h [window-id]     # or evening, tomorrow, next-week, 90m, 15:04…
+ksesh agent list              # every agent, the ones that need you first (-A: only those)
+ksesh agent next              # go to the one waiting longest; again for the next
+ksesh agent last              # back to the agent you were with before
+ksesh agent send 42 --key enter --if-status waiting   # approve window 42
+ksesh agent send 42 "use the existing helper"          # reply to it
+ksesh agent show 42           # its status, branch, changes and screen
+ksesh agent diff 42           # review its work: branch, commits, files, diff
+```
+
+`ksesh agent diff` reviews an agent's work the way its pull request will be
+reviewed: everything since its branch left the base, committed or not. It
+goes through [delta](https://github.com/dandavison/delta) when installed, and
+`--pager` opens it in `less`.
+
+## The thread sidebar
+
+With several agents going, a list sorted by urgency isn't enough. Some you
+want kept in view, some out of the way until later, some you're done with.
+The sidebar, docked to the side of every tab, sorts them into sections:
+
+| section     | holds                                                         |
+| ----------- | ------------------------------------------------------------- |
+| **Pinned**  | threads you pinned, in your order                             |
+| **Inbox**   | everything else, the latest activity first                    |
+| **Working** | agents busy on something that doesn't need you                |
+| **Snoozed** | hidden until a time you picked, or until the agent needs you  |
+| **Settled** | done with: settled by hand, after a week idle, or once its PR was merged |
+
+Threads move on their own: sending an agent a prompt brings its thread back,
+and an agent that starts waiting on you or fails wakes up from a snooze. A
+thread that finished while you weren't looking is marked **unread** (`•`).
+
+Each thread shows its title, how long ago it did something, its session, what
+it needs or is doing, and, when it is on a branch of its own, the branch with
+its commits ahead `↑` and behind `↓` and its pull request.
+
+**Threads outlive their windows.** Close an agent's window, or quit kitty,
+and its thread stays in Settled as a *closed* thread. `enter` resumes it with
+`claude --resume`, in its session and directory.
+
+### Sidebar keys
+
+| key                     | does                                                   |
+| ----------------------- | ------------------------------------------------------ |
+| `enter` / click         | go to the thread (open a shelf, resume a closed thread) |
+| `esc`                   | back to your window                                    |
+| `j` `k` `g` `G` / `tab` | move / next section                                    |
+| `1`–`9`                 | go to the nth thread                                   |
+| `a` `x` `r`             | approve, deny or interrupt, reply                      |
+| `p` / `K` `J`           | pin or unpin / move a pin up or down                   |
+| `s`                     | settle or restore                                      |
+| `z` / `w`               | snooze (1h, 3h, this evening, tomorrow, next week, or any time) / wake |
+| `u`                     | undo the last pin, settle, snooze or wake              |
+| `d`                     | review its changes                                     |
+| `P`                     | open its pull request                                  |
+| `n` / `N`               | new thread / new thread in a new worktree              |
+| `R`                     | rename the thread                                      |
+| `X`                     | close its window (or forget a closed thread)           |
+| `A`                     | archive it: remove its worktree, branch and session    |
+| `m` / right click       | everything you can do to it, as a menu                 |
+| `/`                     | filter                                                 |
+| `o` / `f`               | group the inbox by session / only this session         |
+| `<` `>`                 | narrower, wider                                        |
+| `q`                     | hide the sidebar everywhere                            |
+| `?`                     | every key                                              |
+
+The mouse works too: hover a thread for pin, snooze and settle buttons, and
+click its `#12` to open its pull request.
+
+### From the command line
+
+Every action also works on the thread in the current window, or the one
+given, so you can bind it in kitty:
+
+```sh
+ksesh agent pin [window-id]         # toggle
+ksesh agent settle [window-id]      # toggle
+ksesh agent snooze 3h [window-id]   # or evening, tomorrow, next-week, 90m, 15:04…
 ksesh agent wake [window-id]
-ksesh sidebar print [--json]          # the threads by section, closed ones by conversation id
-ksesh sidebar next / prev             # go down / up the sidebar's order
-ksesh agent resume <conversation>     # resume a closed thread (an id prefix will do)
-ksesh agent forget <conversation>     # drop it from the thread history
-ksesh sidebar goto 3                  # go to its third thread
+ksesh agent resume <conversation>   # resume a closed thread (an id prefix will do)
+ksesh agent forget <conversation>   # drop it from the history
+ksesh sidebar next / prev / goto 3  # move through the sidebar's order
+ksesh sidebar print [--json]        # the threads, by section
 ```
-
-The sidebar's order, which `next`, `prev`, `goto` and the sidebar's `1`–`9`
-follow, is pinned, the inbox (grouped by session after `o`), then working,
-leaving out the snoozed and settled threads; after `f`, only this session's.
-
-`ksesh agent next` skips snoozed and settled threads, and so do the tab bar's
-badges and attention strip: you put those away.
-
-`ksesh setup` maps the sidebar's keys (see [Install](#install)). By hand, it
-takes `listen_on`, the watcher from the [Agents](#agents) section, which gives
-every tab you go to a sidebar while it's on, and background launches with
-`--allow-remote-control`, without which `ksesh` can't reach kitty:
-
-```conf
-map super+b launch --type=background --allow-remote-control ksesh sidebar toggle
-```
-
-Full-window pickers don't fit in the sidebar, so their keys are bound twice:
-pressed in the sidebar, they open over the window beside it instead
-(`ksesh sidebar overlay`).
-
-A running sidebar restarts itself into a new build of `ksesh` within a couple
-of seconds of it being installed.
-
-`super+b` shows or hides the sidebar everywhere. `super+shift+b` moves the
-focus into the tab's sidebar, opening it if needed, and back out again.
-Configure it in `ksesh.toml`:
-
-```toml
-[sidebar]
-edge = "left"               # or "right"
-width = "38"                # columns, or a share of the tab: "20%"
-auto_settle_after_days = 7  # 0 never settles a thread on its own
-keep_closed = 200           # closed threads kept to resume; 0 keeps none
-keep_closed_days = 30       # forget closed threads idle this long; 0 never
-```
-
-Once you resize a sidebar with `<` and `>`, its width is remembered in the
-sidebar's state and wins over `width`. kitty 0.50 can't resize a dock (they
-sit outside the layout `resize-window` works on), so the sidebar docks a new
-one at the new width and closes; sidebars already open in other tabs keep
-theirs until they are opened again.
-
-The sidebar is a window of its own, so it never counts as one of the session's
-windows. A tab's sidebar closes with the tab's last window, and kitty saves it
-with the tab in session files. Whether the sidebar is on, which shelves are
-open and whether the inbox is grouped are shared by every tab's sidebar, in
-`~/.local/state/ksesh/sidebar.json`; a filter is the one sidebar's.
-
-The sidebars don't ask kitty what changed. The watcher's
-[`ksesh_snapshot.py`](contrib/ksesh_snapshot.py) writes what they need (what
-`kitten @ ls` says, less environment variables) to
-`~/.local/state/ksesh/kitty-<kitty's pid>.json` a tenth of a second after
-anything they show changes (a status, a title, the focus, a tab or window
-opening or closing, a command starting), and every 2 seconds for the rest (the
-program running in a window). The sidebars read it, and check it for a change
-5 times a second, so a change shows within about a third of a second however
-many tabs have one, for next to nothing (writing it takes kitty under a
-millisecond). Sidebars of tabs in the background check every 5 seconds. Right
-after a sidebar changes something itself, and whenever the file is missing or
-more than 6 seconds old (the watcher isn't loaded, or kitty quit), they ask
-kitty with `kitten @ ls` instead, every second (5 in the background), as they
-did before. Other ksesh commands always ask kitty.
 
 ## Worktrees
 
-Besides `ksesh worktree connect <issue>` (GitHub issues and PRs, below), ksesh
-manages plain branch worktrees in any repo, workmux-style, as kitty sessions:
+ksesh turns git worktrees into sessions, with an agent already working in
+them:
 
 ```sh
-ksesh wt new feat/login                        # worktree + session for a branch
-ksesh wt new feat/login -p "add a login page"  # …and start claude with a prompt
+ksesh wt new feat/login                        # a worktree and a session for a branch
+ksesh wt new feat/login -p "add a login page"  # …with claude started on a prompt
 ksesh wt new fix/typo --agent codex -b origin/release
 ksesh wt status                                # every worktree: agent, changes, ↑↓ vs base
-ksesh wt rm                                    # remove this session's worktree, branch and session
+ksesh wt rm                                    # remove this worktree, its branch and session
 ksesh wt rm --gone --merged                    # clean up the ones whose PR was merged
+ksesh worktree connect 42                      # a worktree for GitHub issue or PR #42
 ```
 
-`wt new` checks out the branch when it exists locally or on `origin`, and
-creates it from `--base` (default: `base_branch`, else origin's default
-branch) otherwise. Worktrees go in the repo's `[[worktree]] worktree_dir`, or
-next to the repo in `<repo>__worktrees/<branch>` without a block. A new
-worktree gets the files listed in `.worktreeinclude` (the file Claude Code and
-others use for this, as paths and globs) and in `copy` copied in from the main
-worktree, and `symlink` linked. The session then runs `create_command`, then the
-agent (`agent_command`, default `claude`):
+`wt new` checks out the branch if it exists, locally or on `origin`, and
+otherwise creates it from the base branch. By default worktrees go next to the
+repo, in `<repo>__worktrees/<branch>`. Files listed in `.worktreeinclude` are
+copied in from the main worktree.
+
+`wt rm` refuses to remove a worktree with uncommitted changes, and keeps an
+unmerged branch unless you pass `--force`. A branch whose upstream is gone
+counts as merged, since a squash-merged PR never looks merged to git.
+
+Set a repo up in `ksesh.toml`:
 
 ```toml
 [[worktree]]
 path = "~/c/app"
 worktree_dir = "../app__worktrees"
-copy = [".env", "config/*.local"]
-symlink = ["node_modules"]
-create_command = "pnpm install"
-agent_command = "claude"
+copy = [".env", "config/*.local"]   # copied from the main worktree
+symlink = ["node_modules"]          # linked instead
+create_command = "pnpm install"     # run in the new session first
+agent_command = "claude"            # then this
 ```
-
-`wt rm` refuses a worktree with uncommitted changes and keeps an unmerged
-branch unless `--force`. A `--gone` branch (upstream deleted) counts as merged,
-since a squash-merged PR never looks merged to git.
 
 ## Configuration
 
-ksesh reads `~/.config/ksesh/ksesh.toml`, and falls back to
-`~/.config/sesh/sesh.toml`, so an existing sesh config works as is. `-C` picks
-another file. Schema: [`ksesh.schema.json`](ksesh.schema.json).
+ksesh reads **`~/.config/ksesh/ksesh.toml`** (`$XDG_CONFIG_HOME/ksesh`). If
+that file doesn't exist, it reads sesh's `~/.config/sesh/sesh.toml`, so an
+existing sesh setup works unchanged. `--config` (`-C`) picks another file.
+
+> **Note**: ksesh reads one file or the other, never both. Once you create
+> `ksesh.toml`, copy over anything from `sesh.toml` you still want.
+
+The schema, [`ksesh.schema.json`](ksesh.schema.json), gives you completion and
+checks in editors that support it. Everything is optional:
 
 ```toml
-#:schema ./ksesh.schema.json
-
-# kitty-specific options (all optional)
-kitty_socket = "unix:/tmp/kitty"   # reach kitty from outside it; kitty's -<pid> suffix is found
-new_os_window = false              # true: each new session gets its own OS window
-session_file_dirs = ["~/.config/kitty/sessions"]  # listed as the "sessionfile" source
-kitten_command = "kitten"
-kitty_command = "kitty"            # used only to start kitty when none is running
-terminal = "kitty"                 # app brought forward when switching from outside kitty
+#:schema https://raw.githubusercontent.com/xheisenbugx/ksesh/main/ksesh.schema.json
 
 [default_session]
-startup_command = "nvim"
+startup_command = "nvim"              # run in every new session
 
 [[session]]
 name = "dotfiles"
 path = "~/dotfiles"
 startup_command = "nvim"
 alias = "d"
-windows = ["agent", "server"]      # extra tabs, from [[window]] below
+windows = ["agent", "server"]         # extra tabs, from [[window]] below
 
 [[session]]
 name = "work"
 path = "~/c/work"
-session_file = "~/c/work/work.kitty-session"  # start from a kitty session file instead
+session_file = "~/c/work/work.kitty-session"  # build it from a kitty session file
 
 [[window]]
 name = "agent"
@@ -571,38 +429,165 @@ name = "server"
 [tui]
 show_icons = true
 preview = true
-window_name_format = "{index}:{title}"  # {title} {index} {id} {cwd} {cwd_name} {active} {active_title}
+
+[sidebar]
+edge = "left"                # or "right"
+width = "38"                 # columns, or a share of the tab: "20%"
+auto_settle_after_days = 7   # 0 never settles a thread on its own
+keep_closed = 200            # closed threads kept to resume; 0 keeps none
+keep_closed_days = 30        # forget closed threads idle this long; 0 never
+
+[picker]
+open_shelves = ["working"]   # shelves the agent picker opens with: "working", "snoozed", "settled"
 ```
 
-All other sesh options behave as documented in the
-[sesh README](https://github.com/joshmedeski/sesh#configuration): `blacklist`,
-`sort_order` (sources: `kitty`, `config`, `sessionfile`, `zoxide`; sesh's
-`tmux`/`tmuxinator` names are accepted), `dir_length`, `name_substitution`,
-`[[wildcard]]`, `[[worktree]]`, `cache`, `[frecency]`, `[tui]`, aliases and
+<details>
+<summary>kitty options</summary>
+
+```toml
+kitty_socket = "unix:/tmp/kitty"   # reach kitty from outside it
+new_os_window = false              # true: each new session gets its own OS window
+session_file_dirs = ["~/.config/kitty/sessions"]
+kitten_command = "kitten"
+kitty_command = "kitty"            # used to start kitty when none is running
+terminal = "kitty"                 # app brought forward when switching from outside kitty
+
+[tui]
+window_name_format = "{index}:{title}"  # {title} {index} {id} {cwd} {cwd_name} {active} {active_title}
+```
+</details>
+
+Every other sesh option works as the
+[sesh README](https://github.com/joshmedeski/sesh#configuration) describes:
+`blacklist`, `sort_order` (sources `kitty`, `config`, `sessionfile`, `zoxide`;
+sesh's `tmux` and `tmuxinator` names are accepted), `dir_length`,
+`name_substitution`, `[[wildcard]]`, `cache`, `[frecency]`, aliases and
 `import`.
 
 ### Kitty session files
 
-Session files in `session_file_dirs` are listed (source `sessionfile`, flag
-`-T`) and connecting to one runs `goto_session` on it, so kitty builds the
-layout. Kitty names the session after the file, e.g. `api.kitty-session` →
-`api`. Create one from a live setup with kitty's
-`save_as_session --use-foreground-process`.
+Session files in `session_file_dirs` show up in the picker (`ctrl+s`, or
+`ksesh list -T`), and connecting to one lets kitty build its layout. A session
+is named after its file: `api.kitty-session` is `api`. To save your current
+layout as one, use kitty's `save_as_session --use-foreground-process`.
 
-### Differences from sesh
+## Coming from sesh
 
-- `ksesh tab` replaces `sesh window` (`window`/`w` still work as aliases); it
-  prints `tab:<id>` / `window:<id>` targets instead of `session:index`.
-- `connect -T` (tmuxinator) is gone; use session files. `tmuxp` and
-  `tmuxinator` config keys are replaced by `session_file`.
-- Kitty can't rename a session, so `ksesh rename` stores the new name in a
-  `ksesh_name` user variable on the session's windows; kitty keeps its own name
-  for `goto_session` and `tab_bar_filter`.
-- `--switch` is accepted for compatibility; switching works the same from
-  inside and outside kitty.
-- `rename --to` is new; sesh only implements `--enrich`.
+Your commands and config work the same; here's how sesh's tmux ideas map onto
+kitty:
+
+| sesh / tmux          | ksesh / kitty                                               |
+| -------------------- | ----------------------------------------------------------- |
+| tmux session         | kitty session: the windows kitty tags with the same name    |
+| tmux window          | kitty tab (`ksesh tab`, or `ksesh window`)                  |
+| tmux pane            | kitty window (`ksesh list -p`)                              |
+| `switch-client`      | `goto_session`, so kitty's `goto_session -1` follows along  |
+| `capture-pane`       | `kitten @ get-text`, for previews                           |
+| tmuxinator projects  | kitty session files (`*.kitty-session`)                     |
+
+What's different:
+
+- `ksesh tab` replaces `sesh window` (`window` and `w` still work).
+- tmuxinator and tmuxp are gone: use kitty session files and `session_file`.
+- kitty can't rename a session, so `ksesh rename` keeps the new name in a
+  user variable; kitty's own `goto_session` still uses the original one.
+- `rename --to` is new; sesh only has `--enrich`.
+
+## Troubleshooting
+
+**Nothing happens when I press a key, or ksesh says it can't reach kitty.**
+Quit kitty and start it again after the first `just install`: kitty only
+opens its socket (`listen_on`) at start.
+
+**My `ksesh.toml` settings don't apply.** Make sure the file is at
+`~/.config/ksesh/ksesh.toml`. Unknown keys are ignored silently; add
+`strict_mode = true` to have ksesh complain about them. And remember that
+creating `ksesh.toml` stops ksesh from reading `sesh.toml`.
+
+**The sidebar says a thread has no pull request.** The sidebar describes the
+branch checked out in the thread's directory *now*. Pressing `P` asks GitHub
+again and tells you why it found none: the directory is back on the base
+branch, `gh` failed, or the branch has none.
+
+**Codex's status never changes.** Open `/hooks` in Codex and trust ksesh's
+hooks.
+
+**I changed `tab_bar.py` or the watcher, and kitty still runs the old one.**
+kitty loads them once. `kitten @ kitten ksesh_reload.py` reloads them without
+losing your sessions.
+
+**Can I use ksesh without `listen_on`?** Yes, from inside kitty with
+`allow_remote_control yes`, but the sidebar and the agent hooks need a socket.
+
+## How it works
+
+<details>
+<summary>Agent status</summary>
+
+Each agent's hooks run `ksesh agent hook`, which stores its status on the
+agent's own kitty window as user variables: `ksesh_status` (`working`,
+`waiting`, `done`, `error` or `idle`), `ksesh_msg`, `ksesh_prompt`,
+`ksesh_status_at` and `ksesh_turn_at`. The thread state (`ksesh_pin`,
+`ksesh_snooze_until`, `ksesh_settled_at`, …) lives there too, so nothing has
+to run on the side. [`contrib/ksesh_agents.py`](contrib/ksesh_agents.py), a
+kitty watcher, draws the tab bar badges and sends the notifications.
+</details>
+
+<details>
+<summary>The thread history</summary>
+
+Claude Code names its conversation in every hook event, and
+`ksesh agent hook` keeps a record of each one in
+`~/.local/state/ksesh/threads/<conversation>.json`: where it ran, its session,
+title, last status and triage state. That's how a thread outlives its window.
+Agents that don't name their conversation are threads only while their window
+lasts.
+</details>
+
+<details>
+<summary>How the sidebar stays up to date</summary>
+
+The sidebars don't poll kitty. The watcher's
+[`ksesh_snapshot.py`](contrib/ksesh_snapshot.py) writes kitty's state to
+`~/.local/state/ksesh/kitty-<pid>.json` a tenth of a second after anything a
+sidebar shows changes, and the sidebars check that file five times a second
+(every 5 seconds from a tab in the background). If the file is missing or
+stale, they ask kitty with `kitten @ ls` instead.
+
+Branches are read from git every 30 seconds and pull requests from GitHub
+every 5 minutes (every minute for a branch without one), cached in
+`~/.cache/ksesh` for every sidebar to share. Shared sidebar state, such as
+which shelves are open, is in `~/.local/state/ksesh/sidebar.json`.
+
+kitty can't resize a docked window, so `<` and `>` dock a new sidebar at the
+new width. A running sidebar restarts itself into a new build of `ksesh`
+within a couple of seconds of it being installed.
+</details>
+
+<details>
+<summary>Without a socket</summary>
+
+Without `listen_on`, ksesh talks to kitty through the terminal it runs in. A
+TUI and `kitten @` can't share that, so the session picker snapshots kitty
+before it draws and waits until it closes to kill sessions.
+</details>
+
+## Development
+
+```sh
+just test      # regenerate mocks, then run the tests with coverage
+just mock      # regenerate mocks only
+just build     # build to $GOPATH/bin
+just install   # build to ~/.local/bin and run ksesh setup
+```
+
+ksesh needs Go 1.26 (if your default Go is newer, run
+`GOTOOLCHAIN=go1.26.0 just test`). See [`CLAUDE.md`](CLAUDE.md) for a tour of
+the code.
 
 ## Credits
 
-ksesh is a fork of [sesh](https://github.com/joshmedeski/sesh) by Josh Medeski,
-MIT licensed.
+ksesh is a fork of [sesh](https://github.com/joshmedeski/sesh) by Josh
+Medeski, MIT licensed. The sidebar's look borrows from
+[Crush](https://github.com/charmbracelet/crush), and its triage from
+[T3 Code](https://github.com/pingdotgg/t3code).
