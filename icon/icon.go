@@ -29,6 +29,7 @@ var (
 	configIcon      string = ""
 	sessionfileIcon string = ""
 	kittyWindowIcon string = ""
+	hostIcon        string = "\U000f048b" // nf-md-server
 )
 
 // Glyph holds the icon character and ANSI color code for a session source.
@@ -44,6 +45,7 @@ var Glyphs = map[string]Glyph{
 	"zoxide":       {Icon: zoxideIcon, ColorCode: ansi.Cyan},
 	"sessionfile":  {Icon: sessionfileIcon, ColorCode: ansi.Yellow},
 	"kitty-window": {Icon: kittyWindowIcon, ColorCode: ansi.Green},
+	"host":         {Icon: hostIcon, ColorCode: ansi.Magenta},
 }
 
 func ansiString(code int, s string) string {

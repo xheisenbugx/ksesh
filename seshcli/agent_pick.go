@@ -123,7 +123,7 @@ func agentPreview(deps *Deps) func(a *model.Agent, diff bool, width int) (sideba
 			if a.Path == "" {
 				return sidebar.Preview{}, fmt.Errorf("it doesn't say where it runs")
 			}
-			text, err := reviewText(deps, a.Path, "", review.Options{Width: width, MaxFileLines: pickPreviewMaxFileLines}, false)
+			text, err := reviewText(deps, a.Host, a.Path, "", review.Options{Width: width, MaxFileLines: pickPreviewMaxFileLines}, false)
 			return sidebar.Preview{Body: text}, err
 		}
 		if a.Closed {

@@ -118,6 +118,7 @@ func (b *backend) OverlayOn(int, []string, []string) error               { retur
 func (b *backend) NewWindowInSession(model.KittyTabOpts) (string, error) { return "", nil }
 func (b *backend) SendKeys(string, string) (string, error)               { return "", nil }
 func (b *backend) OpenSidebar(int, kitty.SidebarOpts) (int, error)       { return 0, nil }
+func (b *backend) WaitForPrompt(string, time.Duration) error             { return nil }
 func (b *backend) Refresh()                                              {}
 func (b *backend) ResumeThread(string) error                             { return nil }
 func (b *backend) ForgetThread(string) error                             { return nil }
@@ -137,11 +138,11 @@ var branches = map[string]struct {
 	"/code/web":       {status: model.BranchStatus{Branch: "main", OnBase: true}},
 }
 
-func (repos) BranchStatus(dir string) (model.BranchStatus, error) {
+func (repos) BranchStatus(_, dir string) (model.BranchStatus, error) {
 	return branches[dir].status, nil
 }
 
-func (repos) PullRequest(dir, _ string, _ bool) (model.PullRequestState, bool, error) {
+func (repos) PullRequest(_, dir, _ string, _ bool) (model.PullRequestState, bool, error) {
 	pr := branches[dir].pr
 	return pr, pr.Number != 0, nil
 }

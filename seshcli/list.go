@@ -37,6 +37,7 @@ func NewListCommand(base *BaseDeps) *cobra.Command {
 			sessionfile, _ := cmd.Flags().GetBool("session-files")
 			hideDuplicates, _ := cmd.Flags().GetBool("hide-duplicates")
 			panes, _ := cmd.Flags().GetBool("panes")
+			hosts, _ := cmd.Flags().GetBool("hosts")
 			blacklisted, _ := cmd.Flags().GetBool("blacklisted")
 			listFormat, _ := cmd.Flags().GetString("format")
 			formatChanged := cmd.Flags().Changed("format")
@@ -63,6 +64,7 @@ func NewListCommand(base *BaseDeps) *cobra.Command {
 				SessionFile:    sessionfile,
 				HideDuplicates: hideDuplicates,
 				Panes:          panes,
+				Hosts:          hosts,
 				Blacklisted:    blacklisted,
 				Format:         listFormat,
 				FormatSet:      formatChanged,
@@ -102,6 +104,7 @@ func NewListCommand(base *BaseDeps) *cobra.Command {
 	cmd.Flags().BoolP("hide-duplicates", "d", false, "hide duplicate entries")
 	cmd.Flags().BoolP("panes", "p", false, "show the kitty windows (panes) of the current session")
 	cmd.Flags().BoolP("blacklisted", "b", false, "show blacklisted sessions")
+	cmd.Flags().BoolP("hosts", "r", false, "show directories on the [[host]]s, over ssh (host:path)")
 	cmd.Flags().String("format", "", "format each session row ({name}, {session}, {source}, {path}, {active_window_name}, {active_window_name_prefix}; colors: {fg:yellow}...{/fg})")
 	cmd.Flags().StringSlice("icons-exclude", nil, "don't show source icons for these session sources (for example: kitty)")
 

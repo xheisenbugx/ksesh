@@ -27,6 +27,16 @@ type RealConnector struct {
 	kitty   kitty.Kitty
 	zoxide  zoxide.Zoxide
 	focuser focuser.Focuser
+	// hosts are the [[host]]s, whose directories connect opens over ssh.
+	hosts []model.HostConfig
+}
+
+// Option sets up a connector beyond what every connector needs.
+type Option func(*RealConnector)
+
+// WithHosts connects to directories on these machines, as host:path.
+func WithHosts(hosts []model.HostConfig) Option {
+	return func(c *RealConnector) { c.hosts = hosts }
 }
 
 func NewConnector(
@@ -39,16 +49,21 @@ func NewConnector(
 	kitty kitty.Kitty,
 	zoxide zoxide.Zoxide,
 	focuser focuser.Focuser,
+	options ...Option,
 ) Connector {
-	return &RealConnector{
-		config,
-		dir,
-		home,
-		lister,
-		namer,
-		startup,
-		kitty,
-		zoxide,
-		focuser,
+	c := &RealConnector{
+		config:  config,
+		dir:     dir,
+		home:    home,
+		lister:  lister,
+		namer:   namer,
+		startup: startup,
+		kitty:   kitty,
+		zoxide:  zoxide,
+		focuser: focuser,
 	}
+	for _, o := range options {
+		o(c)
+	}
+	return c
 }

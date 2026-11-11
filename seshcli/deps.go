@@ -32,6 +32,7 @@ import (
 	"github.com/xheisenbugx/ksesh/pathwrap"
 	"github.com/xheisenbugx/ksesh/picker"
 	"github.com/xheisenbugx/ksesh/previewer"
+	"github.com/xheisenbugx/ksesh/remote"
 	"github.com/xheisenbugx/ksesh/replacer"
 	"github.com/xheisenbugx/ksesh/runtimewrap"
 	"github.com/xheisenbugx/ksesh/sessionfile"
@@ -79,6 +80,8 @@ type Deps struct {
 	// Threads is kitty with the thread history, for what shows closed
 	// threads: the sidebar.
 	Threads *threads.Kitty
+	// Remote reaches the [[host]]s, and the machines remote agents run on.
+	Remote remote.Remote
 }
 
 // NewBaseDeps constructs all config-free dependencies.
@@ -136,7 +139,8 @@ func (b *BaseDeps) BuildAll(configPath string) (*Deps, error) {
 	issueCache := cache.NewNamespace[github.Issue](
 		worktree.IssueCacheName, worktree.IssueCacheVersion, worktree.IssueCacheTTL,
 	).WithMissingTTL(worktree.IssueCacheMissingTTL)
-	li := lister.NewLister(config, b.Home, t, b.Zoxide, sf, fm, issueCache)
+	rm := remote.NewRemote(b.Shell, config.Hosts)
+	li := lister.NewLister(config, b.Home, t, b.Zoxide, sf, fm, issueCache, lister.WithRemote(rm))
 
 	var usedLister lister.Lister = li
 	var cachedLi *lister.CachingLister
@@ -148,7 +152,7 @@ func (b *BaseDeps) BuildAll(configPath string) (*Deps, error) {
 
 	s := startup.NewStartup(config, usedLister, t, b.Home, b.Replacer)
 	n := namer.NewNamer(b.Path, b.Git, b.Home, config)
-	c := connector.NewConnector(config, b.Dir, b.Home, usedLister, n, s, t, b.Zoxide, b.Focuser)
+	c := connector.NewConnector(config, b.Dir, b.Home, usedLister, n, s, t, b.Zoxide, b.Focuser, connector.WithHosts(config.Hosts))
 	p := previewer.NewPreviewer(usedLister, t, ic, b.Dir, b.Home, l, config, b.Shell)
 	cl := cloner.NewCloner(c, b.Git)
 	br := browser.NewBrowser(b.Runtime, b.Shell, config.Browser)
@@ -184,6 +188,7 @@ func (b *BaseDeps) BuildAll(configPath string) (*Deps, error) {
 		Browser:       br,
 		Mkdirer:       mk,
 		Threads:       th,
+		Remote:        rm,
 	}, nil
 }
 

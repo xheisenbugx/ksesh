@@ -13,6 +13,7 @@ import (
 	"github.com/xheisenbugx/ksesh/kitty"
 	"github.com/xheisenbugx/ksesh/model"
 	"github.com/xheisenbugx/ksesh/namer"
+	"github.com/xheisenbugx/ksesh/remote"
 )
 
 // Record is how a hook event changes its conversation's record: the status
@@ -44,8 +45,12 @@ func Record(r *model.ThreadRecord, u agent.Update, seen *model.Agent, now time.T
 }
 
 // see keeps what a live window shows of its thread: its title, when it is
-// one worth keeping, its session and its triage state.
+// one worth keeping, its session and its triage state, and for an agent on
+// another machine, which one.
 func see(r *model.ThreadRecord, a *model.Agent) {
+	if a.Host != "" {
+		r.Host = a.Host
+	}
 	if t := agent.ThreadTitle(a.Title, cmp.Or(r.Agent, a.Name)); t != "" {
 		r.Title = t
 	}
@@ -151,7 +156,9 @@ func ownConversation(records []model.ThreadRecord, self int) string {
 // sync writes what the live windows show of their threads into their
 // records, when it changed: the title the agent gave its window since its
 // last hook event, a triage change made without the sidebar. Only records
-// the hooks created are kept up to date.
+// the hooks created are kept up to date, and those of agents on other
+// machines, whose hooks write their history there: here, the thread
+// history keeps them from what their windows show.
 func (k *Kitty) sync(live []*model.Agent, records []model.ThreadRecord) {
 	byConv := map[string]model.ThreadRecord{}
 	for _, r := range records {
@@ -159,6 +166,10 @@ func (k *Kitty) sync(live []*model.Agent, records []model.ThreadRecord) {
 	}
 	for _, a := range live {
 		r, ok := byConv[a.Conversation]
+		if a.Conversation != "" && !ok && a.Host != "" {
+			k.adopt(a)
+			continue
+		}
 		if a.Conversation == "" || !ok {
 			continue
 		}
@@ -175,6 +186,26 @@ func (k *Kitty) sync(live []*model.Agent, records []model.ThreadRecord) {
 		if err != nil {
 			slog.Debug("threads: couldn't update", "conversation", a.Conversation, "error", err)
 		}
+	}
+}
+
+// adopt starts the record of an agent on another machine, from its window.
+func (k *Kitty) adopt(a *model.Agent) {
+	now := k.Now()
+	err := k.store.Update(a.Conversation, func(r *model.ThreadRecord) {
+		r.Conversation, r.Agent, r.Cwd = a.Conversation, a.Name, a.Path
+		r.Status, r.Message, r.Prompt = a.Status, a.Message, a.Prompt
+		if a.Since != nil {
+			r.StatusAt = *a.Since
+		}
+		if a.TurnAt != nil {
+			r.TurnAt = *a.TurnAt
+		}
+		see(r, a)
+		r.UpdatedAt = now
+	})
+	if err != nil {
+		slog.Debug("threads: couldn't keep a remote thread", "conversation", a.Conversation, "error", err)
 	}
 }
 
@@ -240,6 +271,9 @@ func (k *Kitty) ResumeThread(conversation string) error {
 	if rec.Cwd == "" {
 		return fmt.Errorf("don't know where the thread ran")
 	}
+	if rec.Host != "" {
+		return k.resumeOn(rec, command)
+	}
 	if info, err := os.Stat(rec.Cwd); err != nil || !info.IsDir() {
 		return fmt.Errorf("the thread's directory is gone: %s", rec.Cwd)
 	}
@@ -270,6 +304,50 @@ func (k *Kitty) ResumeThread(conversation string) error {
 	}
 	k.mu.Lock()
 	k.resumed[conversation] = k.Now()
+	k.mu.Unlock()
+	_, err = k.Kitty.SwitchOrAttach(name, model.ConnectOpts{Switch: true})
+	return err
+}
+
+// remotePrompt is how long a window opened on another machine is given to
+// show its shell's prompt before the agent is typed into it anyway.
+const remotePrompt = 20 * time.Second
+
+// resumeOn resumes a thread of an agent on another machine: a kitty session
+// on it, as `ksesh connect host:dir` opens, running the agent on the
+// conversation once the shell there is up. The window takes on the thread's
+// triage state and title as it opens: the hooks there don't know them.
+func (k *Kitty) resumeOn(rec model.ThreadRecord, command string) error {
+	name := cmp.Or(rec.Session, remote.SessionName(rec.Host, rec.Cwd))
+	thread := agent.Resume(rec.Thread)
+	vars := kitty.ThreadVars(thread)
+	vars[kitty.HostVar] = rec.Host
+	vars[kitty.CwdVar] = rec.Cwd
+	if rec.CustomTitle != "" {
+		vars[kitty.TitleVar] = rec.CustomTitle
+	}
+	window := remote.Join(remote.Window(rec.Host, rec.Cwd)...)
+	sessions, err := k.Kitty.ListSessions()
+	if err != nil {
+		return err
+	}
+	var target string
+	if slices.ContainsFunc(sessions, func(s *model.KittySession) bool { return s.Name == name }) {
+		target, err = k.Kitty.NewWindowInSession(model.KittyTabOpts{TargetSession: name, Command: window, Vars: vars})
+	} else {
+		target, err = k.Kitty.NewSessionWith(name, "", window, vars)
+	}
+	if err != nil {
+		return fmt.Errorf("couldn't open a window on %s to resume in: %w", rec.Host, err)
+	}
+	if err := k.Kitty.WaitForPrompt(target, remotePrompt); err != nil {
+		slog.Debug("threads: resuming without a prompt", "host", rec.Host, "error", err)
+	}
+	if _, err := k.Kitty.SendKeys(target, command); err != nil {
+		return err
+	}
+	k.mu.Lock()
+	k.resumed[rec.Conversation] = k.Now()
 	k.mu.Unlock()
 	_, err = k.Kitty.SwitchOrAttach(name, model.ConnectOpts{Switch: true})
 	return err

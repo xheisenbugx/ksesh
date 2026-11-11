@@ -346,6 +346,7 @@ func ClosedThread(r model.ThreadRecord) *model.Agent {
 		CustomTitle:  r.CustomTitle,
 		Session:      r.Session,
 		Path:         r.Cwd,
+		Host:         r.Host,
 		Name:         r.Agent,
 		Status:       r.Status,
 		Message:      r.Message,

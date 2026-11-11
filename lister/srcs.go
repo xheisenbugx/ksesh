@@ -116,6 +116,9 @@ func srcs(opts ListOptions) []string {
 	if opts.Panes {
 		count++
 	}
+	if opts.Hosts {
+		count++
+	}
 	if count == 0 {
 		return []string{"kitty", "config", "sessionfile", "zoxide"}
 	}
@@ -134,6 +137,9 @@ func srcs(opts ListOptions) []string {
 	}
 	if opts.Panes {
 		srcs = append(srcs, "kitty-window")
+	}
+	if opts.Hosts {
+		srcs = append(srcs, "host")
 	}
 	return srcs
 }

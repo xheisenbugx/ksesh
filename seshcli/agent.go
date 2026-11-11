@@ -45,6 +45,7 @@ with contrib/ksesh_agents.py, in kitty's tab bar and desktop notifications.`,
 		newAgentPathCommand(base),
 		newAgentDiffCommand(base),
 		newAgentPickCommand(base),
+		newAgentBranchCommand(base),
 		newAgentInstallCommand(),
 		newAgentUninstallCommand(),
 	)
@@ -84,6 +85,7 @@ control over the tty would write into the agent's own terminal.`,
 			if !ok {
 				return nil
 			}
+			update.Host = hookHost()
 			var store *threads.Store
 			if update.Conversation != "" {
 				if dir, err := threads.DefaultDir(); err == nil {
@@ -96,6 +98,16 @@ control over the tty would write into the agent's own terminal.`,
 	}
 	cmd.Flags().String("agent", "claude", "whose hook it is: "+strings.Join(agent.HookAgents, ", "))
 	return cmd
+}
+
+// hookHost names the machine a hook runs on: $KSESH_HOST, which ksesh sets
+// in the windows it opens on a [[host]], else the hostname.
+func hookHost() string {
+	if host := os.Getenv("KSESH_HOST"); host != "" {
+		return host
+	}
+	host, _ := os.Hostname()
+	return host
 }
 
 // recordHook writes a hook event onto the agent's window and, for an agent

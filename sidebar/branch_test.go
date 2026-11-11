@@ -61,8 +61,8 @@ func TestBranchesAreAskedAboutOffTheLoopAndCached(t *testing.T) {
 	clock := now
 	m, repos := repoModel(t, &clock)
 	agents := inRepos(fixtures())[1:2] // Write docs, done, in /w/2
-	repos.EXPECT().BranchStatus("/w/2").Return(model.BranchStatus{Branch: "docs/threads", Base: "origin/main", Ahead: 2, Behind: 1, Worktree: "/w/2"}, nil).Once()
-	repos.EXPECT().PullRequest("/w/2", "docs/threads", false).Return(model.PullRequestState{Number: 12, State: model.PROpen}, true, nil).Once()
+	repos.EXPECT().BranchStatus("", "/w/2").Return(model.BranchStatus{Branch: "docs/threads", Base: "origin/main", Ahead: 2, Behind: 1, Worktree: "/w/2"}, nil).Once()
+	repos.EXPECT().PullRequest("", "/w/2", "docs/threads", false).Return(model.PullRequestState{Number: 12, State: model.PROpen}, true, nil).Once()
 
 	m, cmd := update(m, loadedMsg{agents: agents, current: 1, shown: true, focused: true})
 	assert.NotContains(t, ansi.Strip(m.View().Content), "docs/threads", "nothing known until git answers")
@@ -75,7 +75,7 @@ func TestBranchesAreAskedAboutOffTheLoopAndCached(t *testing.T) {
 	m = answer(t, m, cmd) // nothing to ask: the mocks would fail on a second call
 
 	clock = clock.Add(gitTTL)
-	repos.EXPECT().BranchStatus("/w/2").Return(model.BranchStatus{Branch: "docs/threads", Base: "origin/main", Ahead: 3}, nil).Once()
+	repos.EXPECT().BranchStatus("", "/w/2").Return(model.BranchStatus{Branch: "docs/threads", Base: "origin/main", Ahead: 3}, nil).Once()
 	m, cmd = update(m, loadedMsg{agents: agents, current: 1, shown: true, focused: true})
 	m = answer(t, m, cmd)
 	assert.Contains(t, ansi.Strip(m.View().Content), "docs/threads ↑3 "+iconPR+" #12", "git again, the pull request not yet")
@@ -92,9 +92,9 @@ func TestABranchWithoutAPullRequestOrOnTheBase(t *testing.T) {
 	clock := now
 	m, repos := repoModel(t, &clock)
 	agents := inRepos(fixtures())[1:3]
-	repos.EXPECT().BranchStatus("/w/2").Return(model.BranchStatus{Branch: "main", OnBase: true}, nil).Once()
-	repos.EXPECT().BranchStatus("/w/3").Return(model.BranchStatus{Branch: "wip", Base: "origin/main"}, nil).Once()
-	repos.EXPECT().PullRequest("/w/3", "wip", false).Return(model.PullRequestState{}, false, nil).Once()
+	repos.EXPECT().BranchStatus("", "/w/2").Return(model.BranchStatus{Branch: "main", OnBase: true}, nil).Once()
+	repos.EXPECT().BranchStatus("", "/w/3").Return(model.BranchStatus{Branch: "wip", Base: "origin/main"}, nil).Once()
+	repos.EXPECT().PullRequest("", "/w/3", "wip", false).Return(model.PullRequestState{}, false, nil).Once()
 
 	m, cmd := update(m, loadedMsg{agents: agents, current: 1, shown: true, focused: true})
 	m = answer(t, m, cmd)
@@ -135,8 +135,8 @@ func TestAThreadWhosePullRequestWasMergedSettlesItself(t *testing.T) {
 	merged := model.PullRequestState{Number: 12, State: model.PRMerged}
 	for _, a := range agents {
 		dir := a.Path
-		repos.EXPECT().BranchStatus(dir).Return(model.BranchStatus{Branch: "b" + dir, Base: "origin/main"}, nil).Once()
-		repos.EXPECT().PullRequest(dir, "b"+dir, false).Return(merged, true, nil).Once()
+		repos.EXPECT().BranchStatus("", dir).Return(model.BranchStatus{Branch: "b" + dir, Base: "origin/main"}, nil).Once()
+		repos.EXPECT().PullRequest("", dir, "b"+dir, false).Return(merged, true, nil).Once()
 	}
 	// Only the finished one: 1 waits on you, 3 is pinned, 4 works, 5 is
 	// snoozed and 6 settled already, for inactivity.
@@ -227,8 +227,8 @@ func TestASwitchedBranchForgetsTheLastOnesPullRequest(t *testing.T) {
 	clock := now
 	m, repos := repoModel(t, &clock)
 	agents := inRepos(fixtures())[1:2] // Write docs, in /w/2
-	repos.EXPECT().BranchStatus("/w/2").Return(model.BranchStatus{Branch: "docs", Base: "origin/main"}, nil).Once()
-	repos.EXPECT().PullRequest("/w/2", "docs", false).Return(model.PullRequestState{Number: 12, State: model.PROpen, URL: "u"}, true, nil).Once()
+	repos.EXPECT().BranchStatus("", "/w/2").Return(model.BranchStatus{Branch: "docs", Base: "origin/main"}, nil).Once()
+	repos.EXPECT().PullRequest("", "/w/2", "docs", false).Return(model.PullRequestState{Number: 12, State: model.PROpen, URL: "u"}, true, nil).Once()
 	m, cmd := update(m, loadedMsg{agents: agents, current: 1, shown: true, focused: true})
 	m = answer(t, m, cmd)
 	_, ok := m.pullRequest(agents[0])
@@ -237,8 +237,8 @@ func TestASwitchedBranchForgetsTheLastOnesPullRequest(t *testing.T) {
 	// The agent checks out another branch in the same directory and opens a
 	// pull request for it, well within prTTL.
 	clock = clock.Add(gitTTL)
-	repos.EXPECT().BranchStatus("/w/2").Return(model.BranchStatus{Branch: "feat/next", Base: "origin/main"}, nil).Once()
-	repos.EXPECT().PullRequest("/w/2", "feat/next", false).Return(model.PullRequestState{Number: 13, State: model.PROpen, URL: "u13"}, true, nil).Once()
+	repos.EXPECT().BranchStatus("", "/w/2").Return(model.BranchStatus{Branch: "feat/next", Base: "origin/main"}, nil).Once()
+	repos.EXPECT().PullRequest("", "/w/2", "feat/next", false).Return(model.PullRequestState{Number: 13, State: model.PROpen, URL: "u13"}, true, nil).Once()
 	m, cmd = update(m, loadedMsg{agents: agents, current: 1, shown: true, focused: true})
 	m = answer(t, m, cmd)
 	pr, ok := m.pullRequest(agents[0])
@@ -247,7 +247,7 @@ func TestASwitchedBranchForgetsTheLastOnesPullRequest(t *testing.T) {
 
 	// Back on the base branch: no pull request, not the last one's.
 	clock = clock.Add(gitTTL)
-	repos.EXPECT().BranchStatus("/w/2").Return(model.BranchStatus{Branch: "main", OnBase: true}, nil).Once()
+	repos.EXPECT().BranchStatus("", "/w/2").Return(model.BranchStatus{Branch: "main", OnBase: true}, nil).Once()
 	m, cmd = update(m, loadedMsg{agents: agents, current: 1, shown: true, focused: true})
 	m = answer(t, m, cmd)
 	_, ok = m.pullRequest(agents[0])
@@ -259,13 +259,13 @@ func TestABranchWithoutAPullRequestIsAskedAgainSooner(t *testing.T) {
 	clock := now
 	m, repos := repoModel(t, &clock)
 	agents := inRepos(fixtures())[1:2]
-	repos.EXPECT().BranchStatus("/w/2").Return(model.BranchStatus{Branch: "docs", Base: "origin/main"}, nil)
-	repos.EXPECT().PullRequest("/w/2", "docs", false).Return(model.PullRequestState{}, false, nil).Once()
+	repos.EXPECT().BranchStatus("", "/w/2").Return(model.BranchStatus{Branch: "docs", Base: "origin/main"}, nil)
+	repos.EXPECT().PullRequest("", "/w/2", "docs", false).Return(model.PullRequestState{}, false, nil).Once()
 	m, cmd := update(m, loadedMsg{agents: agents, current: 1, shown: true, focused: true})
 	m = answer(t, m, cmd)
 
 	clock = clock.Add(prMissTTL)
-	repos.EXPECT().PullRequest("/w/2", "docs", false).Return(model.PullRequestState{Number: 4, State: model.PROpen, URL: "u"}, true, nil).Once()
+	repos.EXPECT().PullRequest("", "/w/2", "docs", false).Return(model.PullRequestState{Number: 4, State: model.PROpen, URL: "u"}, true, nil).Once()
 	m, cmd = update(m, loadedMsg{agents: agents, current: 1, shown: true, focused: true})
 	m = answer(t, m, cmd)
 	_, ok := m.pullRequest(agents[0])

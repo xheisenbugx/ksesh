@@ -41,6 +41,9 @@ type (
 		NeedsAttention      bool              `json:"needs_attention"`
 		HasActivity         bool              `json:"has_activity_since_last_focus"`
 		ForegroundProcesses []lsProcess       `json:"foreground_processes"`
+		// AtPrompt is set while the window's shell waits at its prompt, as
+		// shell integration reports it, over ssh too.
+		AtPrompt bool `json:"at_prompt"`
 	}
 
 	lsProcess struct {

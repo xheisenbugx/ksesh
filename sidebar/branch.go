@@ -17,11 +17,12 @@ import (
 // (git, and gh over the network): the sidebar asks off its UI loop, and only
 // as often as gitTTL and prTTL let it.
 type Repos interface {
-	// BranchStatus is where dir's branch stands against its base.
-	BranchStatus(dir string) (model.BranchStatus, error)
+	// BranchStatus is where dir's branch stands against its base. dir is
+	// on host, when that isn't empty: a thread on another machine.
+	BranchStatus(host, dir string) (model.BranchStatus, error)
 	// PullRequest is the pull request of branch, checked out in dir. fresh
 	// asks GitHub even when a recent answer is cached.
-	PullRequest(dir, branch string, fresh bool) (model.PullRequestState, bool, error)
+	PullRequest(host, dir, branch string, fresh bool) (model.PullRequestState, bool, error)
 }
 
 // How long what the sidebar knows of a thread's branch is good for: git is
@@ -51,9 +52,18 @@ type branchInfo struct {
 	busy     bool // being asked about now
 }
 
+// branchKey is where what is known of a directory's branch is kept: by
+// directory, and by host for a directory on another machine.
+func branchKey(host, dir string) string {
+	if host == "" {
+		return dir
+	}
+	return host + ":" + dir
+}
+
 // branchMsg is the answer about one directory.
 type branchMsg struct {
-	dir               string
+	host, dir         string
 	at                time.Time
 	status            model.BranchStatus
 	ok, checkedStatus bool
@@ -72,14 +82,14 @@ func (m Model) refreshBranches() []tea.Cmd {
 	now := m.opts.Now()
 	var cmds []tea.Cmd
 	for _, a := range m.agents {
-		dir := a.Path
+		host, dir := a.Host, a.Path
 		if dir == "" {
 			continue
 		}
-		info := m.branches[dir]
+		info := m.branches[branchKey(host, dir)]
 		if info == nil {
 			info = &branchInfo{}
-			m.branches[dir] = info
+			m.branches[branchKey(host, dir)] = info
 		}
 		ttl := prTTL
 		if _, ok := info.knownPR(); !ok {
@@ -92,9 +102,9 @@ func (m Model) refreshBranches() []tea.Cmd {
 		info.busy = true
 		known, knownOK, clock := info.status, info.ok, m.opts.Now
 		cmds = append(cmds, func() tea.Msg {
-			msg := branchMsg{dir: dir, status: known, ok: knownOK}
+			msg := branchMsg{host: host, dir: dir, status: known, ok: knownOK}
 			if wantStatus {
-				st, err := repos.BranchStatus(dir)
+				st, err := repos.BranchStatus(host, dir)
 				msg.status, msg.ok, msg.checkedStatus = st, err == nil, true
 				// Another branch was checked out: what is known of the last
 				// one's pull request isn't this one's.
@@ -103,7 +113,7 @@ func (m Model) refreshBranches() []tea.Cmd {
 			if wantPR {
 				msg.checkedPR = true
 				if msg.ownBranch() {
-					msg.pr, msg.hasPR, msg.prErr = repos.PullRequest(dir, msg.status.Branch, false)
+					msg.pr, msg.hasPR, msg.prErr = repos.PullRequest(host, dir, msg.status.Branch, false)
 				}
 			}
 			msg.at = clock()
@@ -129,10 +139,10 @@ func (info *branchInfo) knownPR() (model.PullRequestState, bool) {
 
 // learn takes in an answer about a directory's branch.
 func (m *Model) learn(msg branchMsg) {
-	info := m.branches[msg.dir]
+	info := m.branches[branchKey(msg.host, msg.dir)]
 	if info == nil {
 		info = &branchInfo{}
-		m.branches[msg.dir] = info
+		m.branches[branchKey(msg.host, msg.dir)] = info
 	}
 	info.busy = false
 	if msg.checkedStatus {
@@ -187,7 +197,7 @@ func (m *Model) settleMerged() []tea.Cmd {
 
 // branchOf is what is known of the branch a thread is on.
 func (m Model) branchOf(a *model.Agent) (*branchInfo, bool) {
-	info := m.branches[a.Path]
+	info := m.branches[branchKey(a.Host, a.Path)]
 	if info == nil || !info.ok {
 		return nil, false
 	}

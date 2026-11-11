@@ -541,7 +541,7 @@ func short(d time.Duration) string {
 func title(a *model.Agent) string { return agent.Title(a) }
 
 // hints are the keys worth showing for what is selected, most useful first,
-// the key to the help last. The picker always offers its diff, which shows
+// the key to the actions menu (on a thread) or to the help last. The picker always offers its diff, which shows
 // beside the list.
 func (m Model) hints() []key.Binding {
 	hints := m.threadHints()
@@ -585,14 +585,22 @@ func (m Model) threadHints() []key.Binding {
 	case rowMore:
 		return []key.Binding{k.says(actGo, "show all"), help}
 	}
+	// On a thread the last hint is its actions menu, which has the rest,
+	// the help among them. The sidebar names m for it, as short as ?, not
+	// space, its leader, which the help shows.
+	more := k.says(actMenu, "more")
 	a := r.agent
+	_, hasPR := m.pullRequest(a)
 	switch {
 	case a.Closed:
-		return []key.Binding{k.says(actGo, "resume"), k.says(actClose, "forget"), help}
+		if hasPR {
+			return []key.Binding{k.says(actGo, "resume"), k.says(actPR, "pr"), k.says(actClose, "forget"), more}
+		}
+		return []key.Binding{k.says(actGo, "resume"), k.says(actClose, "forget"), more}
 	case r.section == agent.Snoozed:
-		return []key.Binding{k.says(actGo, "go"), k.says(actWake, "wake"), k.says(actUndo, "undo"), help}
+		return []key.Binding{k.says(actGo, "go"), k.says(actWake, "wake"), k.says(actUndo, "undo"), more}
 	case r.section == agent.Settled:
-		return []key.Binding{k.says(actGo, "go"), k.says(actSettle, "restore"), k.says(actUndo, "undo"), help}
+		return []key.Binding{k.says(actGo, "go"), k.says(actSettle, "restore"), k.says(actUndo, "undo"), more}
 	}
 	pin := "pin"
 	if a.Thread.Pin != 0 {
@@ -607,20 +615,23 @@ func (m Model) threadHints() []key.Binding {
 	}
 	switch agent.Status(a.Status) {
 	case agent.Waiting:
-		return []key.Binding{k.says(actApprove, "approve"), k.says(actDeny, "deny"), k.says(actReply, "reply"), k.says(actGo, "go"), k.says(actSnooze, "snooze"), help}
+		return []key.Binding{k.says(actApprove, "approve"), k.says(actDeny, "deny"), k.says(actReply, "reply"), k.says(actGo, "go"), k.says(actSnooze, "snooze"), more}
 	case agent.Working:
-		return []key.Binding{k.says(actGo, "go"), k.says(actDeny, "stop"), k.says(actReply, "reply"), k.says(actPin, pin), help}
+		return []key.Binding{k.says(actGo, "go"), k.says(actDeny, "stop"), k.says(actReply, "reply"), k.says(actPin, pin), more}
+	case agent.Error:
+		// It stopped on a failure: tell it what to do, or see what it left.
+		return []key.Binding{k.says(actGo, "go"), k.says(actReply, "reply"), review, k.says(actSettle, "settle"), more}
 	}
 	if agent.BadgeOf(a, m.now) == agent.BadgeWoke {
-		return []key.Binding{k.says(actGo, "go"), k.says(actWake, "dismiss"), k.says(actSettle, "settle"), help}
+		return []key.Binding{k.says(actGo, "go"), k.says(actWake, "dismiss"), k.says(actSettle, "settle"), more}
 	}
 	if agent.Status(a.Status) == agent.Done {
-		if _, ok := m.pullRequest(a); ok {
-			return []key.Binding{k.says(actGo, "go"), review, k.says(actPR, "pr"), k.says(actSettle, "settle"), help}
+		if hasPR {
+			return []key.Binding{k.says(actGo, "go"), review, k.says(actPR, "pr"), k.says(actSettle, "settle"), more}
 		}
-		return []key.Binding{k.says(actGo, "go"), review, k.says(actSettle, "settle"), k.says(actPin, pin), help}
+		return []key.Binding{k.says(actGo, "go"), review, k.says(actSettle, "settle"), k.says(actPin, pin), more}
 	}
-	return []key.Binding{k.says(actGo, "go"), k.says(actSettle, "settle"), k.says(actPin, pin), k.says(actSnooze, "snooze"), review, help}
+	return []key.Binding{k.says(actGo, "go"), k.says(actSettle, "settle"), k.says(actPin, pin), k.says(actSnooze, "snooze"), review, more}
 }
 
 // key is a key as the footer and the help show it.

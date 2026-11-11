@@ -8,6 +8,7 @@ import (
 	"github.com/xheisenbugx/ksesh/lister"
 	"github.com/xheisenbugx/ksesh/ls"
 	"github.com/xheisenbugx/ksesh/model"
+	"github.com/xheisenbugx/ksesh/remote"
 	"github.com/xheisenbugx/ksesh/shell"
 )
 
@@ -33,6 +34,7 @@ func NewPreviewer(
 ) Previewer {
 	strategies := []PreviewStrategy{
 		NewKittyStrategy(lister, kitty),
+		NewHostStrategy(remote.NewRemote(shell, config.Hosts)),
 		NewConfigStrategy(lister, shell),
 		NewDefaultConfigStrategy(lister, config, ls),
 		NewDirectoryStrategy(home, dir, ls),

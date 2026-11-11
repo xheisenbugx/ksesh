@@ -13,7 +13,7 @@ import (
 func TestPickerSourcesMirrorTheFzfPicker(t *testing.T) {
 	l := lister.NewMockLister(t)
 	base := lister.ListOptions{HideAttached: true}
-	sources := pickerSources(l, base)
+	sources := pickerSources(l, base, false)
 
 	require.Len(t, sources, 5)
 	var keys, labels []string

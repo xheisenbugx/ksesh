@@ -20,11 +20,14 @@ type (
 		SessionFile    bool
 		HideDuplicates bool
 		Panes          bool
-		Blacklisted    bool
-		Format         string
-		FormatSet      bool
-		IconExcludes   []string
-		SortOrder      model.SortOrder
+		// Hosts lists the directories of the [[host]]s. Each is an ssh
+		// round trip, so it is never part of listing everything.
+		Hosts        bool
+		Blacklisted  bool
+		Format       string
+		FormatSet    bool
+		IconExcludes []string
+		SortOrder    model.SortOrder
 	}
 	srcStrategy func(*RealLister) (model.SeshSessions, error)
 )
@@ -41,6 +44,7 @@ var srcStrategies = map[string]srcStrategy{
 	"sessionfile":  listSessionFile,
 	"zoxide":       listZoxide,
 	"kitty-window": listKittyWindows,
+	"host":         listHosts,
 }
 
 func (l *RealLister) List(opts ListOptions) (model.SeshSessions, error) {

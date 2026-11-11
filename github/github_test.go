@@ -175,3 +175,32 @@ func TestIssue(t *testing.T) {
 		assert.NoError(t, err)
 	})
 }
+
+func TestRepoOf(t *testing.T) {
+	cases := map[string]string{
+		"git@github.com:o/r.git":               "github.com/o/r",
+		"https://github.com/o/r":               "github.com/o/r",
+		"https://github.com/o/r.git":           "github.com/o/r",
+		"ssh://git@github.com/o/r.git":         "github.com/o/r",
+		"ssh://git@ghe.corp:2222/team/svc.git": "ghe.corp/team/svc",
+	}
+	for url, want := range cases {
+		got, ok := RepoOf(url)
+		assert.True(t, ok, url)
+		assert.Equal(t, want, got, url)
+	}
+	_, ok := RepoOf("/srv/git/r.git")
+	assert.False(t, ok)
+}
+
+func TestPrStateIn(t *testing.T) {
+	s := shell.NewMockShell(t)
+	s.EXPECT().CmdCapture("gh", "pr", "view", "feat/x", "--json", "number,state,isDraft,url", "--repo", "github.com/o/r").
+		Return(`{"number":7,"state":"OPEN","isDraft":false,"url":"u"}`, nil)
+	g := NewGithub(s, git.NewMockGit(t))
+
+	pr, found, err := g.PrStateIn("git@github.com:o/r.git", "feat/x")
+	require.NoError(t, err)
+	assert.True(t, found)
+	assert.Equal(t, 7, pr.Number)
+}

@@ -12,12 +12,13 @@ import (
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 
+	"github.com/xheisenbugx/ksesh/model"
 	"github.com/xheisenbugx/ksesh/review"
 )
 
 func newAgentDiffCommand(base *BaseDeps) *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "diff <window-id>",
+		Use:   "diff [window-id]",
 		Short: "Review what an agent has done: its branch, commits, files and diff",
 		Long: `Review the worktree an agent works in, the way its branch will be reviewed:
 everything since it left its base (origin's default branch, or the upstream
@@ -28,16 +29,25 @@ It prints the branch against its base, the commits, the files with their
 added and deleted lines, and the diff, drawn with line numbers and tinted
 backgrounds. With delta (https://github.com/dandavison/delta) on the PATH the
 diff goes through it instead, for syntax highlighting. The width is the fzf
-preview's, the terminal's, or --width.`,
-		Args: cobra.ExactArgs(1),
+preview's, the terminal's, or --width.
+
+An agent on another machine is reviewed there, by its ksesh, over ssh.
+--dir reviews a directory rather than an agent's.`,
+		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			deps, err := buildDeps(cmd, base)
 			if err != nil {
 				return err
 			}
-			a, err := findAgent(deps, args[0])
-			if err != nil {
-				return err
+			a := &model.Agent{}
+			if dir, _ := cmd.Flags().GetString("dir"); dir != "" {
+				a.Path = dir
+			} else if len(args) == 1 {
+				if a, err = findAgent(deps, args[0]); err != nil {
+					return err
+				}
+			} else {
+				return fmt.Errorf("which agent? give its window id, or --dir")
 			}
 			baseRef, _ := cmd.Flags().GetString("base")
 			statOnly, _ := cmd.Flags().GetBool("stat")
@@ -48,7 +58,7 @@ preview's, the terminal's, or --width.`,
 			}
 
 			maxLines, _ := cmd.Flags().GetInt("max-file-lines")
-			text, err := reviewText(deps, a.Path, baseRef, review.Options{Width: width, StatOnly: statOnly, MaxFileLines: maxLines}, noDelta)
+			text, err := reviewText(deps, a.Host, a.Path, baseRef, review.Options{Width: width, StatOnly: statOnly, MaxFileLines: maxLines}, noDelta)
 			if err != nil {
 				return err
 			}
@@ -60,6 +70,7 @@ preview's, the terminal's, or --width.`,
 			return page(text+"\n", cmd.OutOrStdout(), cmd.ErrOrStderr())
 		},
 	}
+	cmd.Flags().String("dir", "", "review this directory rather than an agent's")
 	cmd.Flags().Bool("pager", false, "page it in less, as the sidebar's d does")
 	cmd.Flags().String("base", "", "ref to compare against (default: origin's default branch)")
 	cmd.Flags().Bool("stat", false, "only the summary: branch, commits and files")
@@ -71,8 +82,23 @@ preview's, the terminal's, or --width.`,
 
 // reviewText is the review of the worktree in dir against base (origin's
 // default branch when empty): drawn by ksesh, or its diff by delta when that
-// is installed and noDelta isn't set.
-func reviewText(deps *Deps, dir, base string, opts review.Options, noDelta bool) (string, error) {
+// is installed and noDelta isn't set. A dir on another machine (host) is
+// reviewed by the ksesh there.
+func reviewText(deps *Deps, host, dir, base string, opts review.Options, noDelta bool) (string, error) {
+	if host != "" {
+		args := []string{"ksesh", "agent", "diff", "--dir", dir, "--width", strconv.Itoa(opts.Width),
+			"--max-file-lines", strconv.Itoa(opts.MaxFileLines)}
+		if base != "" {
+			args = append(args, "--base", base)
+		}
+		if opts.StatOnly {
+			args = append(args, "--stat")
+		}
+		if noDelta {
+			args = append(args, "--no-delta")
+		}
+		return deps.Remote.Run(host, "", args...)
+	}
 	r, err := review.Collect(deps.Shell, dir, base)
 	if err != nil {
 		return "", err

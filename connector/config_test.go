@@ -3,6 +3,8 @@ package connector
 import (
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+	mock "github.com/stretchr/testify/mock"
 	"github.com/xheisenbugx/ksesh/dir"
 	"github.com/xheisenbugx/ksesh/home"
 	"github.com/xheisenbugx/ksesh/kitty"
@@ -11,8 +13,6 @@ import (
 	"github.com/xheisenbugx/ksesh/namer"
 	"github.com/xheisenbugx/ksesh/startup"
 	"github.com/xheisenbugx/ksesh/zoxide"
-	"github.com/stretchr/testify/assert"
-	mock "github.com/stretchr/testify/mock"
 )
 
 func TestConfigStrategy(t *testing.T) {
@@ -33,6 +33,7 @@ func TestConfigStrategy(t *testing.T) {
 		mockStartup,
 		mockKitty,
 		mockZoxide,
+		nil,
 		nil,
 	}
 	mockKitty.On("AttachSession", mock.Anything).Return("attaching", nil)

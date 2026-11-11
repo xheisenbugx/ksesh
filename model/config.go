@@ -84,6 +84,21 @@ type (
 		TUI             TUIConfig      `toml:"tui"`
 		Sidebar         SidebarConfig  `toml:"sidebar"`
 		Picker          PickerConfig   `toml:"picker"`
+		Hosts           []HostConfig   `toml:"host"`
+	}
+
+	// HostConfig is a [[host]]: another machine, reached with ssh, whose
+	// directories the session picker lists and opens as kitty sessions over
+	// `kitten ssh`.
+	HostConfig struct {
+		// Name is how ssh reaches it: a Host of ~/.ssh/config, or user@host.
+		Name string `toml:"name"`
+		// Paths are directories on it to always list, besides those its
+		// zoxide knows.
+		Paths []string `toml:"paths"`
+		// Zoxide lists the directories the host's zoxide knows. Unset means
+		// true.
+		Zoxide *bool `toml:"zoxide"`
 	}
 
 	// PickerConfig is [picker]: the agent picker (`ksesh agent pick`).

@@ -6,12 +6,14 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/xheisenbugx/ksesh/kitty"
 	"github.com/xheisenbugx/ksesh/model"
+	"github.com/xheisenbugx/ksesh/remote"
 )
 
 // ksesh is the command line running this ksesh with args.
@@ -28,6 +30,7 @@ func (m Model) ksesh(args ...string) []string {
 // tab's.
 type newThread struct {
 	session, dir string
+	host         string // the machine dir is on, when it isn't this one
 	branch       string // the new worktree's, once asked
 }
 
@@ -45,7 +48,7 @@ func (m Model) startNewThread(inWorktree bool) (tea.Model, tea.Cmd) {
 		}
 	}
 	if ok {
-		m.fresh = newThread{session: a.Session, dir: a.Path}
+		m.fresh = newThread{session: a.Session, dir: a.Path, host: a.Host}
 	}
 	where := cmp.Or(m.fresh.session, "this tab")
 	if !inWorktree {
@@ -55,6 +58,10 @@ func (m Model) startNewThread(inWorktree bool) (tea.Model, tea.Cmd) {
 	}
 	if m.fresh.dir == "" || m.opts.Run == nil {
 		m.say("select a thread in the repo to branch off")
+		return m, nil
+	}
+	if m.fresh.host != "" {
+		m.say("worktrees on " + m.fresh.host + " aren't supported yet")
 		return m, nil
 	}
 	m, cmd := m.prompt(modeNewBranch, "")
@@ -77,9 +84,22 @@ func (m Model) launchThread(prompt string) tea.Cmd {
 		if prompt != "" {
 			line += " " + shellQuote(prompt)
 		}
-		target, err := b.NewWindowInSession(model.KittyTabOpts{TargetSession: at.session, StartDir: at.dir, Background: true})
+		opts := model.KittyTabOpts{TargetSession: at.session, StartDir: at.dir, Background: true}
+		if at.host != "" {
+			// On another machine: a `kitten ssh` window there, the agent
+			// typed in once its shell is up.
+			opts.StartDir = ""
+			opts.Command = remote.Join(remote.Window(at.host, at.dir)...)
+			opts.Vars = map[string]string{kitty.HostVar: at.host, kitty.CwdVar: at.dir}
+		}
+		target, err := b.NewWindowInSession(opts)
 		if err != nil {
 			return doneMsg{err: err}
+		}
+		if at.host != "" {
+			if err := b.WaitForPrompt(target, remoteShellWait); err != nil {
+				return doneMsg{err: err}
+			}
 		}
 		// Typed into the tab's shell, so the shell is still there when the
 		// agent exits, as in a session ksesh wt new starts.
@@ -97,6 +117,10 @@ func (m Model) launchThread(prompt string) tea.Cmd {
 		return doneMsg{flash: flash, err: b.FocusWindow(id)}
 	}
 }
+
+// remoteShellWait is how long a new window on another machine is given to
+// show its shell's prompt.
+const remoteShellWait = 20 * time.Second
 
 // launchWorktree runs `ksesh wt new <branch> -p <prompt>` in the thread's
 // directory: a worktree for the branch, a session in it and the agent.
@@ -121,7 +145,8 @@ func (m Model) launchWorktree(prompt string) tea.Cmd {
 // `ksesh wt rm`.
 func (m Model) archivable(a *model.Agent) (string, bool) {
 	info, ok := m.branchOf(a)
-	if !ok || info.status.Worktree == "" || m.opts.Run == nil {
+	// ksesh wt rm runs here, so only for a worktree on this machine.
+	if !ok || info.status.Worktree == "" || m.opts.Run == nil || a.Host != "" {
 		return "", false
 	}
 	return info.status.Worktree, true
@@ -289,18 +314,18 @@ func (m Model) openPR() (tea.Model, tea.Cmd) {
 	if pr, ok := m.pullRequest(a); ok {
 		return m, m.do("opened #"+strconv.Itoa(pr.Number), nil, func(Backend) error { return open(pr.URL) })
 	}
-	repos, dir, clock := m.opts.Repos, a.Path, m.opts.Now
+	repos, host, dir, clock := m.opts.Repos, a.Host, a.Path, m.opts.Now
 	if repos == nil || dir == "" {
 		m.say("no pull request for its branch")
 		return m, nil
 	}
 	m.say("looking for its pull request…")
 	return m, func() tea.Msg {
-		msg := branchMsg{dir: dir, checkedStatus: true, checkedPR: true}
-		st, err := repos.BranchStatus(dir)
+		msg := branchMsg{host: host, dir: dir, checkedStatus: true, checkedPR: true}
+		st, err := repos.BranchStatus(host, dir)
 		msg.status, msg.ok = st, err == nil
 		if msg.ownBranch() {
-			msg.pr, msg.hasPR, msg.prErr = repos.PullRequest(dir, st.Branch, true)
+			msg.pr, msg.hasPR, msg.prErr = repos.PullRequest(host, dir, st.Branch, true)
 		}
 		msg.at = clock()
 		return prLookupMsg{msg}

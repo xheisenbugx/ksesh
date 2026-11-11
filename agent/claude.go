@@ -35,6 +35,10 @@ type Update struct {
 	Conversation string
 	Cwd          string
 	Transcript   string
+	// Host names the machine the hook runs on ($KSESH_HOST, else its
+	// hostname), for kitty to tell an agent on another machine, reached
+	// with `kitten ssh`, from one on its own.
+	Host string
 	// Carry is the triage state the thread history has for the
 	// conversation, given to the window when the conversation first shows
 	// up in it: the thread was resumed there.

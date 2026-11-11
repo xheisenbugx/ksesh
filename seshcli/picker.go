@@ -49,7 +49,7 @@ func NewPickerCommand(base *BaseDeps) *cobra.Command {
 			// Without a source flag, the picker lists everything and switches
 			// between the sources with a key, as contrib/ksesh-fzf does.
 			if !config && !kitty && !zoxide && !sessionfile {
-				pickerOpts.Sources = pickerSources(deps.Lister, listerOpts)
+				pickerOpts.Sources = pickerSources(deps.Lister, listerOpts, len(deps.Config.Hosts) > 0)
 			}
 			if cmd.Flags().Changed("icons") {
 				showIcons := true
@@ -140,7 +140,7 @@ func NewPickerCommand(base *BaseDeps) *cobra.Command {
 // pickerSources are the lists the picker switches between, all of them first:
 // ^a everything, ^t kitty's sessions, ^g the configured ones, ^s the session
 // files and ^z zoxide's directories (^x kills or removes the selected row).
-func pickerSources(l lister.Lister, base lister.ListOptions) []picker.Source {
+func pickerSources(l lister.Lister, base lister.ListOptions, hosts bool) []picker.Source {
 	source := func(key, label, src string, set func(*lister.ListOptions)) picker.Source {
 		opts := base
 		set(&opts)
@@ -151,11 +151,17 @@ func pickerSources(l lister.Lister, base lister.ListOptions) []picker.Source {
 			Fetch: func() (model.SeshSessions, error) { return l.List(opts) },
 		}
 	}
-	return []picker.Source{
+	sources := []picker.Source{
 		source("ctrl+a", "all", "", func(*lister.ListOptions) {}),
 		source("ctrl+t", "kitty", "kitty", func(o *lister.ListOptions) { o.Kitty = true }),
 		source("ctrl+g", "configs", "config", func(o *lister.ListOptions) { o.Config = true }),
 		source("ctrl+s", "files", "sessionfile", func(o *lister.ListOptions) { o.SessionFile = true }),
 		source("ctrl+z", "zoxide", "zoxide", func(o *lister.ListOptions) { o.Zoxide = true }),
 	}
+	if hosts {
+		// Directories on the [[host]]s, opened over ssh. Only on their own
+		// tab: each host is an ssh round trip.
+		sources = append(sources, source("ctrl+r", "hosts", "host", func(o *lister.ListOptions) { o.Hosts = true }))
+	}
+	return sources
 }

@@ -9,4 +9,6 @@ type KittyTabOpts struct {
 	// command exits. Empty starts the default shell.
 	Command    string
 	Background bool // create the tab without focusing it
+	// Vars are user variables to set on the new window.
+	Vars map[string]string
 }
