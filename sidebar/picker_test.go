@@ -19,12 +19,13 @@ func pickerModel(t *testing.T) (Model, *MockBackend) {
 	t.Helper()
 	b := NewMockBackend(t)
 	m := New(Options{
-		Backend:    b,
-		Self:       9,
-		ThreadOpts: agent.ThreadOpts{AutoSettleAfter: agent.DefaultAutoSettleAfter},
-		StatePath:  filepath.Join(t.TempDir(), "sidebar.json"),
-		Now:        func() time.Time { return now },
-		Picker:     true,
+		Backend:     b,
+		Self:        9,
+		ThreadOpts:  agent.ThreadOpts{AutoSettleAfter: agent.DefaultAutoSettleAfter},
+		StatePath:   filepath.Join(t.TempDir(), "sidebar.json"),
+		Now:         func() time.Time { return now },
+		Picker:      true,
+		OpenShelves: []agent.Section{agent.SectionWorking},
 		Preview: func(a *model.Agent, diff bool, width int) (Preview, error) {
 			if diff {
 				return Preview{Body: "diff of " + title(a)}, nil
@@ -153,12 +154,33 @@ func TestAFilterMatchingOnlyAShelfSelectsItsThread(t *testing.T) {
 
 func TestThePickersShelvesAreItsOwn(t *testing.T) {
 	m, _ := pickerModel(t)
-	assert.Contains(t, ansi.Strip(m.View().Content), "Long build", "shelves start open in the picker")
+	view := ansi.Strip(m.View().Content)
+	assert.Contains(t, view, "Long build", "the shelves it is told to open")
+	assert.NotContains(t, view, "Later", "and no others")
 	next, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyEnd})
 	m = next.(Model)
 	r, _, _ := m.selected()
-	require.Equal(t, rowThread, r.kind)
+	require.Equal(t, rowHeader, r.kind)
+	next, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	m = next.(Model)
+	assert.Contains(t, ansi.Strip(m.View().Content), "Old", "enter opens a shelf")
 	assert.Nil(t, LoadState(m.opts.StatePath).Expanded, "the sidebars' shelves untouched")
+}
+
+func TestASearchLooksInEveryShelf(t *testing.T) {
+	m, _ := pickerModel(t)
+	m.opts.OpenShelves = nil
+	m.opened = map[agent.Section]bool{}
+	assert.NotContains(t, ansi.Strip(m.View().Content), "Later")
+
+	m = typeText(t, m, "later")
+	assert.Contains(t, ansi.Strip(m.View().Content), "Later", "a snoozed thread is found")
+	a, ok := m.selectedAgent()
+	require.True(t, ok)
+	assert.Equal(t, "Later", title(a))
+
+	next, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
+	assert.NotContains(t, ansi.Strip(next.(Model).View().Content), "Later", "closed again once the filter is cleared")
 }
 
 // runBatch runs a command and what it batches, returning their messages.

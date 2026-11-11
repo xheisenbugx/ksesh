@@ -227,9 +227,16 @@ status bar only shows those that do something for the selected thread:
 
 The screen follows the agent's bottom unless you scroll up, under a header
 that stays: its status, where it runs, its branch and changes. The list is
-the sidebar's, sections and shelves included, so snoozed and settled threads
-are a search away; opening or closing a shelf in the picker leaves the
-sidebars' alone. [`contrib/ksesh-agents-fzf`](contrib/ksesh-agents-fzf), the
+the sidebar's, sections and shelves included. It opens with only Working
+open; typing a filter opens every shelf, so snoozed and settled threads are a
+search away, and clearing it closes them again. `enter` on a shelf opens or
+closes it, without touching the sidebars'. Which shelves it opens with is
+set in `ksesh.toml`:
+
+```toml
+[picker]
+open_shelves = ["working"]  # any of "working", "snoozed", "settled"; [] keeps them all closed
+``` [`contrib/ksesh-agents-fzf`](contrib/ksesh-agents-fzf), the
 fzf picker it replaces, is still installed next to `ksesh.conf`.
 
 The status also shows wherever sessions do: `ksesh list -i`, `ksesh-fzf` and
