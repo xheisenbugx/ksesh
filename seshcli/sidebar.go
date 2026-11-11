@@ -188,13 +188,15 @@ const (
 	prCacheName    = "sidebar-prs"
 	prCacheVersion = 1
 	prCacheTTL     = 5 * time.Minute
+	prMissingTTL   = time.Minute
 )
 
 func newSidebarRepos(deps *Deps) sidebarRepos {
 	return sidebarRepos{
-		wt:  deps.Worktree,
-		gh:  deps.Github,
-		prs: cache.NewNamespace[model.PullRequestState](prCacheName, prCacheVersion, prCacheTTL),
+		wt: deps.Worktree,
+		gh: deps.Github,
+		// A branch without one may get one any time: an agent opens it.
+		prs: cache.NewNamespace[model.PullRequestState](prCacheName, prCacheVersion, prCacheTTL).WithMissingTTL(prMissingTTL),
 	}
 }
 
@@ -202,12 +204,12 @@ func (r sidebarRepos) BranchStatus(dir string) (model.BranchStatus, error) {
 	return r.wt.BranchStatus(dir)
 }
 
-func (r sidebarRepos) PullRequest(dir, branch string) (model.PullRequestState, bool, error) {
+func (r sidebarRepos) PullRequest(dir, branch string, fresh bool) (model.PullRequestState, bool, error) {
 	key := dir + "\x00" + branch
-	if pr, found, fresh := r.prs.Lookup(r.prs.Load(), key); fresh {
+	if pr, found, cached := r.prs.Lookup(r.prs.Load(), key); cached && !fresh {
 		return pr, found, nil
 	}
-	pr, found, err := r.gh.PrState(dir)
+	pr, found, err := r.gh.PrState(dir, branch)
 	if err != nil {
 		return pr, false, err
 	}

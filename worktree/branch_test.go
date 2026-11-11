@@ -136,7 +136,7 @@ func TestBranchStatus(t *testing.T) {
 	m.git.EXPECT().ShowTopLevel("/code/app/src").Return(true, "/code/app", nil)
 	st, err = w.BranchStatus("/code/app/src")
 	require.NoError(t, err)
-	assert.Equal(t, model.BranchStatus{Branch: "main"}, st, "the base branch in the main worktree")
+	assert.Equal(t, model.BranchStatus{Branch: "main", OnBase: true}, st, "the base branch in the main worktree")
 }
 
 func TestNewReusesAnExistingWorktree(t *testing.T) {

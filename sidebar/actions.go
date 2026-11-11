@@ -258,22 +258,27 @@ func (m Model) review() (tea.Model, tea.Cmd) {
 // sidebar has found one with a URL.
 func (m Model) pullRequest(a *model.Agent) (model.PullRequestState, bool) {
 	info, ok := m.branchOf(a)
-	if !ok || !info.hasPR || info.pr.URL == "" {
+	if !ok {
 		return model.PullRequestState{}, false
 	}
-	return info.pr, true
+	pr, ok := info.knownPR()
+	if !ok || pr.URL == "" {
+		return model.PullRequestState{}, false
+	}
+	return pr, true
 }
 
+// prLookupMsg is the answer to looking for a thread's pull request when
+// asked to open it.
+type prLookupMsg struct{ branchMsg }
+
 // openPR opens the pull request of the selected thread's branch in the
-// browser.
+// browser. When the sidebar doesn't know of one (it asks GitHub every few
+// minutes, and not yet for a thread just opened), it asks git and GitHub
+// there and then, and says why there is none.
 func (m Model) openPR() (tea.Model, tea.Cmd) {
 	a, ok := m.selectedAgent()
 	if !ok {
-		return m, nil
-	}
-	pr, ok := m.pullRequest(a)
-	if !ok {
-		m.say("no pull request for its branch")
 		return m, nil
 	}
 	open := m.opts.OpenURL
@@ -281,7 +286,50 @@ func (m Model) openPR() (tea.Model, tea.Cmd) {
 		m.say("can't open a browser from here")
 		return m, nil
 	}
-	return m, m.do("opened #"+strconv.Itoa(pr.Number), nil, func(Backend) error { return open(pr.URL) })
+	if pr, ok := m.pullRequest(a); ok {
+		return m, m.do("opened #"+strconv.Itoa(pr.Number), nil, func(Backend) error { return open(pr.URL) })
+	}
+	repos, dir, clock := m.opts.Repos, a.Path, m.opts.Now
+	if repos == nil || dir == "" {
+		m.say("no pull request for its branch")
+		return m, nil
+	}
+	m.say("looking for its pull request…")
+	return m, func() tea.Msg {
+		msg := branchMsg{dir: dir, checkedStatus: true, checkedPR: true}
+		st, err := repos.BranchStatus(dir)
+		msg.status, msg.ok = st, err == nil
+		if msg.ownBranch() {
+			msg.pr, msg.hasPR, msg.prErr = repos.PullRequest(dir, st.Branch, true)
+		}
+		msg.at = clock()
+		return prLookupMsg{msg}
+	}
+}
+
+// foundPR takes in the answer to openPR's lookup: opens the pull request
+// found, or says why there is none.
+func (m Model) foundPR(msg prLookupMsg) (tea.Model, tea.Cmd) {
+	m.learn(msg.branchMsg)
+	cmds := m.settleMerged()
+	st, where := msg.status, filepath.Base(msg.dir)
+	switch {
+	case !msg.ok:
+		m.say(where + " isn't in a git repo")
+	case st.Branch == "":
+		m.say(where + " has no branch checked out (detached HEAD)")
+	case st.OnBase:
+		m.say(where + " is on " + st.Branch + ", the base branch: no pull request")
+	case msg.prErr != nil:
+		m.say("couldn't ask GitHub: " + msg.prErr.Error())
+		m.failed, m.until = true, m.opts.Now().Add(2*flashFor)
+	case !msg.hasPR || msg.pr.URL == "":
+		m.say("no pull request for " + st.Branch)
+	default:
+		open, pr := m.opts.OpenURL, msg.pr
+		cmds = append(cmds, m.do("opened #"+strconv.Itoa(pr.Number), nil, func(Backend) error { return open(pr.URL) }))
+	}
+	return m, tea.Batch(cmds...)
 }
 
 // onPRLabel reports whether column x of a thread's second line is on its

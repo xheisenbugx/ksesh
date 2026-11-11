@@ -187,7 +187,8 @@ func (w *RealWorktree) BranchStatus(dir string) (model.BranchStatus, error) {
 		}
 	}
 	base := w.base(repo, "")
-	if st.Branch != strings.TrimPrefix(base, "origin/") {
+	st.OnBase = st.Branch == strings.TrimPrefix(base, "origin/")
+	if !st.OnBase {
 		if ahead, behind, err := w.git.AheadBehind(dir, base); err == nil {
 			st.Base, st.Ahead, st.Behind = base, ahead, behind
 		}

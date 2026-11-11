@@ -19,8 +19,9 @@ import (
 type Repos interface {
 	// BranchStatus is where dir's branch stands against its base.
 	BranchStatus(dir string) (model.BranchStatus, error)
-	// PullRequest is the pull request of the branch checked out in dir.
-	PullRequest(dir, branch string) (model.PullRequestState, bool, error)
+	// PullRequest is the pull request of branch, checked out in dir. fresh
+	// asks GitHub even when a recent answer is cached.
+	PullRequest(dir, branch string, fresh bool) (model.PullRequestState, bool, error)
 }
 
 // How long what the sidebar knows of a thread's branch is good for: git is
@@ -28,15 +29,23 @@ type Repos interface {
 const (
 	gitTTL = 30 * time.Second
 	prTTL  = 5 * time.Minute
+	// prMissTTL is how soon a branch without a pull request is asked about
+	// again: an agent may open one any time.
+	prMissTTL = time.Minute
 )
 
 // branchInfo is what the sidebar knows of the branch checked out in a
 // directory.
 type branchInfo struct {
-	status   model.BranchStatus
-	ok       bool // the directory is in a repo
-	pr       model.PullRequestState
-	hasPR    bool
+	status model.BranchStatus
+	ok     bool // the directory is in a repo
+	pr     model.PullRequestState
+	hasPR  bool
+	// prBranch is the branch pr and hasPR are about: once another branch is
+	// checked out, they say nothing of it.
+	prBranch string
+	// prErr is why the last look for its pull request failed.
+	prErr    error
 	statusAt time.Time
 	prAt     time.Time
 	busy     bool // being asked about now
@@ -72,7 +81,11 @@ func (m Model) refreshBranches() []tea.Cmd {
 			info = &branchInfo{}
 			m.branches[dir] = info
 		}
-		wantStatus, wantPR := now.Sub(info.statusAt) >= gitTTL, now.Sub(info.prAt) >= prTTL
+		ttl := prTTL
+		if _, ok := info.knownPR(); !ok {
+			ttl = prMissTTL
+		}
+		wantStatus, wantPR := now.Sub(info.statusAt) >= gitTTL, now.Sub(info.prAt) >= ttl
 		if info.busy || (!wantStatus && !wantPR) {
 			continue
 		}
@@ -83,13 +96,14 @@ func (m Model) refreshBranches() []tea.Cmd {
 			if wantStatus {
 				st, err := repos.BranchStatus(dir)
 				msg.status, msg.ok, msg.checkedStatus = st, err == nil, true
+				// Another branch was checked out: what is known of the last
+				// one's pull request isn't this one's.
+				wantPR = wantPR || st.Branch != known.Branch
 			}
 			if wantPR {
 				msg.checkedPR = true
-				// Only a branch of its own has a pull request: not the base
-				// branch, nor a detached HEAD.
-				if msg.ok && msg.status.Branch != "" && msg.status.Base != "" {
-					msg.pr, msg.hasPR, msg.prErr = repos.PullRequest(dir, msg.status.Branch)
+				if msg.ownBranch() {
+					msg.pr, msg.hasPR, msg.prErr = repos.PullRequest(dir, msg.status.Branch, false)
 				}
 			}
 			msg.at = clock()
@@ -97,6 +111,20 @@ func (m Model) refreshBranches() []tea.Cmd {
 		})
 	}
 	return cmds
+}
+
+// ownBranch reports whether the answer is about a branch that can have a
+// pull request: not the base branch, nor a detached HEAD.
+func (msg branchMsg) ownBranch() bool {
+	return msg.ok && msg.status.Branch != "" && !msg.status.OnBase
+}
+
+// knownPR is the pull request of the branch checked out now, when known.
+func (info *branchInfo) knownPR() (model.PullRequestState, bool) {
+	if info == nil || !info.hasPR || info.prBranch != info.status.Branch {
+		return model.PullRequestState{}, false
+	}
+	return info.pr, true
 }
 
 // learn takes in an answer about a directory's branch.
@@ -113,8 +141,9 @@ func (m *Model) learn(msg branchMsg) {
 	if msg.checkedPR {
 		// A failed request keeps what was known, and waits its turn to ask
 		// again.
+		info.prErr = msg.prErr
 		if msg.prErr == nil {
-			info.pr, info.hasPR = msg.pr, msg.hasPR
+			info.pr, info.hasPR, info.prBranch = msg.pr, msg.hasPR, msg.status.Branch
 		}
 		info.prAt = msg.at
 	}
@@ -132,7 +161,10 @@ func (m *Model) settleMerged() []tea.Cmd {
 	now := m.opts.Now()
 	for _, a := range m.agents {
 		info, ok := m.branchOf(a)
-		if !ok || !info.hasPR || info.pr.State != model.PRMerged {
+		if !ok {
+			continue
+		}
+		if pr, ok := info.knownPR(); !ok || pr.State != model.PRMerged {
 			continue
 		}
 		if at, ok := m.autoSettled[a.WindowID]; ok && now.Sub(at) < settleAgain {
@@ -180,7 +212,8 @@ const (
 //	feat/login ↑2↓1  #12
 func (m Model) branchLabel(a *model.Agent) string {
 	info, ok := m.branchOf(a)
-	if !ok || info.status.Branch == "" || (info.status.Base == "" && !info.hasPR) {
+	pr, hasPR := info.knownPR()
+	if !ok || info.status.Branch == "" || info.status.OnBase || (info.status.Base == "" && !hasPR) {
 		return ""
 	}
 	st := info.status
@@ -195,13 +228,13 @@ func (m Model) branchLabel(a *model.Agent) string {
 	if counts != "" {
 		out += " " + m.th.Mute(counts)
 	}
-	if info.hasPR {
-		icon, color := prIcon(info.pr)
-		pr := icon + " #" + strconv.Itoa(info.pr.Number)
+	if hasPR {
+		icon, color := prIcon(pr)
+		label := icon + " #" + strconv.Itoa(pr.Number)
 		if color == 0 {
-			out += " " + m.th.Mute(pr)
+			out += " " + m.th.Mute(label)
 		} else {
-			out += " " + ui.Fg(color, pr)
+			out += " " + ui.Fg(color, label)
 		}
 	}
 	return out
