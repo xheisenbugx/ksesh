@@ -7,27 +7,7 @@ ksesh is a port of [sesh](https://github.com/joshmedeski/sesh) that uses
 picker, and keep track of every Claude Code, Codex or Gemini CLI agent you
 have running, from a sidebar in every tab.
 
-```
- Threads ╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱
- all sessions · 6                1  1
-
-  PINNED ──────────────────────── 1
-   Refactor auth                1h
-    api · › split the session store
-
-  INBOX ───────────────────────── 2
-▌  Fix the login redirect       2m ●
-▌   api · Allow Bash: npm test
-   Write the README             5m
-    docs · Added a Threads section
-
- ────────────────────────────────────
- ▸ ⠹ Working                        2
- ▸  Snoozed                        1
- ▸  Settled                        9
- ────────────────────────────────────
- a approve · x deny · r reply · ? keys
-```
+![The agent picker: every agent in kitty, with the selected one's screen beside the list](docs/images/agents.png)
 
 ## What you get
 
@@ -168,6 +148,8 @@ ksesh tab connect ~/c/api -c 'npm run dev'
 
 ### The session picker
 
+![The session picker: running kitty sessions, configured ones, session files and zoxide directories, with a preview](docs/images/sessions.png)
+
 `cmd+p` lists everything (`sort_order` sets the order). Type to filter, then:
 
 | key                            | does                                         |
@@ -244,7 +226,7 @@ A finished agent turns back to idle once you look at its window.
 ### The agent picker
 
 `cmd+a` opens every agent in a full window, with the selected one's screen
-beside the list. Type to filter (fzf style: `lgn` finds `login`), and:
+beside the list (it's the screenshot at the top of this page). Type to filter (fzf style: `lgn` finds `login`), and:
 
 | key                             | does                                          |
 | ------------------------------- | --------------------------------------------- |
@@ -287,6 +269,11 @@ goes through [delta](https://github.com/dandavison/delta) when installed, and
 With several agents going, a list sorted by urgency isn't enough. Some you
 want kept in view, some out of the way until later, some you're done with.
 The sidebar, docked to the side of every tab, sorts them into sections:
+
+<p align="center">
+  <img src="docs/images/sidebar.png" width="380" alt="The thread sidebar: pinned threads, the inbox, and the Working, Snoozed and Settled shelves">
+</p>
+
 
 | section     | holds                                                         |
 | ----------- | ------------------------------------------------------------- |
@@ -579,7 +566,13 @@ just test      # regenerate mocks, then run the tests with coverage
 just mock      # regenerate mocks only
 just build     # build to $GOPATH/bin
 just install   # build to ~/.local/bin and run ksesh setup
+just screenshots  # regenerate the README's screenshots
 ```
+
+The screenshots in this README come from [`docs/demo`](docs/demo), which runs
+the real sidebar and pickers on made-up data. `just screenshots` regenerates
+them (it needs [vhs](https://github.com/charmbracelet/vhs) and FiraCode Nerd
+Font).
 
 ksesh needs Go 1.26 (if your default Go is newer, run
 `GOTOOLCHAIN=go1.26.0 just test`). See [`CLAUDE.md`](CLAUDE.md) for a tour of
