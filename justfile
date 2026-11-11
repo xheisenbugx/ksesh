@@ -97,3 +97,13 @@ build version="dev":
 man: build
     mkdir -p share/man/man1
     ksesh man > share/man/man1/ksesh.1
+
+# Regenerate the README's screenshots from made-up data (needs vhs and FiraCode Nerd Font)
+screenshots:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    bin="$(mktemp -d)"
+    go build -o "$bin/ksesh-demo" ./docs/demo
+    for tape in docs/demo/*.tape; do PATH="$bin:$PATH" vhs "$tape"; done
+    # Only the screenshots are kept, not the recordings vhs makes with them.
+    rm -f docs/images/*.gif
