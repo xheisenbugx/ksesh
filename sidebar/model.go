@@ -35,6 +35,9 @@ type Backend interface {
 	CloseSidebars() error
 	OverlayOn(windowID int, env []string, command []string) error
 	NewWindowInSession(opts model.KittyTabOpts) (string, error)
+	// WaitForPrompt waits until a new window's shell is up, as one on
+	// another machine takes a moment to be.
+	WaitForPrompt(target string, timeout time.Duration) error
 	SendKeys(target string, command string) (string, error)
 	OpenSidebar(windowID int, opts kitty.SidebarOpts) (int, error)
 	Refresh()

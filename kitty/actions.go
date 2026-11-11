@@ -3,8 +3,10 @@ package kitty
 import (
 	"cmp"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -26,6 +28,10 @@ func WindowTarget(id int) string { return windowTargetPrefix + strconv.Itoa(id) 
 func TabTarget(id int) string { return tabTargetPrefix + strconv.Itoa(id) }
 
 func (k *RealKitty) NewSession(sessionName string, startDir string) (string, error) {
+	return k.NewSessionWith(sessionName, startDir, "", nil)
+}
+
+func (k *RealKitty) NewSessionWith(sessionName, startDir, command string, vars map[string]string) (string, error) {
 	if sessionName == "" || sessionName == "." || sessionName == "!" {
 		// kitty reads these as "the source window's session" and "no session".
 		return "", fmt.Errorf("invalid kitty session name: %q", sessionName)
@@ -42,11 +48,49 @@ func (k *RealKitty) NewSession(sessionName string, startDir string) (string, err
 	if native != sessionName {
 		args = append(args, "--var", NameVar+"="+sessionName)
 	}
+	args = append(args, varArgs(vars)...)
+	if command != "" {
+		args = append(args, "--", userShell(), "-c", command)
+	}
 	out, err := k.mutate(args...)
 	if err != nil {
 		return "", err
 	}
 	return windowTargetFromLaunch(out)
+}
+
+// varArgs are launch's --var arguments for user variables, in a stable
+// order.
+func varArgs(vars map[string]string) []string {
+	var args []string
+	for _, name := range slices.Sorted(maps.Keys(vars)) {
+		args = append(args, "--var", name+"="+vars[name])
+	}
+	return args
+}
+
+// promptPoll is how often WaitForPrompt looks.
+const promptPoll = 250 * time.Millisecond
+
+func (k *RealKitty) WaitForPrompt(target string, timeout time.Duration) error {
+	id, err := strconv.Atoi(strings.TrimPrefix(target, "window:"))
+	if err != nil {
+		return fmt.Errorf("not a window target: %q", target)
+	}
+	deadline := k.now().Add(timeout)
+	for {
+		w, err := k.window(id)
+		if err != nil {
+			return err
+		}
+		if w.AtPrompt {
+			return nil
+		}
+		if k.now().After(deadline) {
+			return fmt.Errorf("window %d isn't at a prompt after %s", id, timeout)
+		}
+		time.Sleep(promptPoll)
+	}
 }
 
 func (k *RealKitty) NewWindowInSession(opts model.KittyTabOpts) (string, error) {
@@ -78,6 +122,7 @@ func (k *RealKitty) NewWindowInSession(opts model.KittyTabOpts) (string, error) 
 	if sess.name != sess.native {
 		args = append(args, "--var", NameVar+"="+sess.name)
 	}
+	args = append(args, varArgs(opts.Vars)...)
 	if opts.Command != "" {
 		args = append(args, "--", userShell(), "-c", opts.Command)
 	}

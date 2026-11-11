@@ -17,6 +17,7 @@ type (
 		Src  string // The source of the session (config, kitty, zoxide, sessionfile)
 		Name string // The display name
 		Path string // The absolute directory path
+		Host string // The machine Path is on, for a [[host]] session (source "host")
 
 		StartupCommand        string         // The command to run when the session is started
 		PreviewCommand        string         // The command to run when the session is previewed

@@ -26,6 +26,8 @@ have running, from a sidebar in every tab.
 - **An agent picker** (`cmd+a`) with each agent's screen, or its diff, beside
   the list.
 - **Git worktrees as sessions**, with an agent already started in them.
+- **Other machines too.** Open a project on a server over SSH from the
+  picker; agents running there show up in your sidebar like local ones.
 - **All of sesh's features**: zoxide, config sessions, startup commands,
   windows, wildcards, aliases, previews and caching. Your `sesh.toml` works as
   is.
@@ -39,6 +41,7 @@ have running, from a sidebar in every tab.
 - [Agents](#agents)
 - [The thread sidebar](#the-thread-sidebar)
 - [Worktrees](#worktrees)
+- [Remote machines](#remote-machines)
 - [Configuration](#configuration)
 - [Coming from sesh](#coming-from-sesh)
 - [Troubleshooting](#troubleshooting)
@@ -156,6 +159,7 @@ ksesh tab connect ~/c/api -c 'npm run dev'
 | ------------------------------ | -------------------------------------------- |
 | `enter`                        | go to the session                            |
 | `ctrl+a` `t` `g` `s` `z`       | show all, kitty sessions, configs, session files, zoxide |
+| `ctrl+r`                       | directories on your [other machines](#remote-machines) |
 | `ctrl+x`                       | kill the session, or forget a zoxide directory |
 | `ctrl+o`                       | show or hide the preview                     |
 | `esc`                          | quit                                         |
@@ -376,6 +380,60 @@ create_command = "pnpm install"     # run in the new session first
 agent_command = "claude"            # then this
 ```
 
+## Remote machines
+
+Agents often run on a bigger machine than your laptop. ksesh can open
+projects on other machines over SSH and track the agents running there, all
+from your local kitty.
+
+### Setting a machine up
+
+1. **Add it to `ksesh.toml`**, by the name `ssh` knows it by:
+
+   ```toml
+   [[host]]
+   name = "devbox"                     # a Host in ~/.ssh/config, or user@host
+   paths = ["~/code/api", "/srv/app"]  # always listed; its zoxide directories are added
+   ```
+
+2. **Install ksesh on the machine**, and the agent hooks there. For a Linux
+   server, from this repo:
+
+   ```sh
+   GOOS=linux GOARCH=amd64 go build -o /tmp/ksesh . && scp /tmp/ksesh devbox:.local/bin/
+   ssh devbox ksesh agent install      # or --codex, --gemini, --all
+   ```
+
+   The machine needs `git`, and optionally `zoxide`. It doesn't need `gh`:
+   pull requests are looked up from your laptop.
+
+### Using it
+
+- **Open a project there**: press `cmd+p`, then **`ctrl+r`** for the hosts
+  tab, and pick a directory. Or `ksesh connect devbox:~/code/api`. It opens a
+  kitty session named `api@devbox` running `kitten ssh devbox`, already in
+  that directory.
+- **Start an agent** in it as usual. Its status shows in the tab bar,
+  notifications, the agent picker and the sidebar, and you can approve, deny
+  or reply to it from there.
+- **Branches, pull requests and reviews** work too: the sidebar asks the
+  machine's ksesh about the branch, and `d` / `ctrl+g` review the work on the
+  machine itself.
+- **Closed threads resume on their machine**: `enter` opens a new `kitten ssh`
+  window there and runs `claude --resume` once its shell is up.
+- **`n` in the sidebar** next to a remote thread starts the new one on the
+  same machine.
+
+Already use `kitten ssh` your own way? Add `--kitten forward_remote_control=yes`
+(or set it in kitty's `ssh.conf`), and agents started in that window report
+here too.
+
+Not yet: creating or archiving worktrees on another machine (`N` and `A` in
+the sidebar), and agents that keep running after you disconnect.
+
+> **Security**: forwarding kitty's remote control lets programs on that
+> machine control your kitty. Only do it for machines you trust.
+
 ## Configuration
 
 ksesh reads **`~/.config/ksesh/ksesh.toml`** (`$XDG_CONFIG_HOME/ksesh`). If
@@ -426,6 +484,11 @@ keep_closed_days = 30        # forget closed threads idle this long; 0 never
 
 [picker]
 open_shelves = ["working"]   # shelves the agent picker opens with: "working", "snoozed", "settled"
+
+[[host]]
+name = "devbox"              # another machine, as ssh knows it (see Remote machines)
+paths = ["~/code/api"]       # always listed in the picker's hosts tab
+zoxide = true                # also list the directories its zoxide knows
 ```
 
 <details>
@@ -495,6 +558,11 @@ creating `ksesh.toml` stops ksesh from reading `sesh.toml`.
 branch checked out in the thread's directory *now*. Pressing `P` asks GitHub
 again and tells you why it found none: the directory is back on the base
 branch, `gh` failed, or the branch has none.
+
+**An agent on another machine doesn't show up.** Check that ksesh and its
+hooks are installed there (`ssh devbox ksesh agent install`), and that its
+window was opened by ksesh or with `kitten ssh --kitten
+forward_remote_control=yes`.
 
 **Codex's status never changes.** Open `/hooks` in Codex and trust ksesh's
 hooks.

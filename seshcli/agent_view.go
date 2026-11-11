@@ -192,7 +192,10 @@ func showHeader(deps *Deps, a *model.Agent, now time.Time) []string {
 
 	path, _ := deps.Home.ShortenHome(a.Path)
 	second := "\033[2m" + path
-	if ok, branch, err := deps.Git.CurrentBranch(a.Path); err == nil && ok {
+	if a.Host != "" {
+		// On another machine: its git is there.
+		second = "\033[2m" + a.Host + ":" + a.Path
+	} else if ok, branch, err := deps.Git.CurrentBranch(a.Path); err == nil && ok {
 		second += "  " + branch
 		if s, err := deps.Git.StatusSummary(a.Path); err == nil {
 			changes := changesLabel(model.GitWorktree{Staged: s.Staged, Unstaged: s.Unstaged, Untracked: s.Untracked})

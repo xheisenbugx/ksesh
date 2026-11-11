@@ -12,6 +12,7 @@ import (
 	"github.com/xheisenbugx/ksesh/github"
 	"github.com/xheisenbugx/ksesh/kitty"
 	"github.com/xheisenbugx/ksesh/model"
+	"github.com/xheisenbugx/ksesh/remote"
 	"github.com/xheisenbugx/ksesh/sidebar"
 )
 
@@ -29,18 +30,18 @@ func TestSidebarReposSharePullRequestsThroughTheirCache(t *testing.T) {
 		return sidebarRepos{gh: gh, prs: cache.NewNamespaceInDir[model.PullRequestState](dir, prCacheName, prCacheVersion, prCacheTTL)}
 	}
 
-	pr, found, err := repos().PullRequest("/w/login", "feat/login", false)
+	pr, found, err := repos().PullRequest("", "/w/login", "feat/login", false)
 	require.NoError(t, err)
 	assert.True(t, found)
 	assert.Equal(t, 12, pr.Number)
-	_, found, _ = repos().PullRequest("/w/new", "new", false)
+	_, found, _ = repos().PullRequest("", "/w/new", "new", false)
 	assert.False(t, found)
 
 	// Another sidebar: gh isn't asked again.
-	pr, found, _ = repos().PullRequest("/w/login", "feat/login", false)
+	pr, found, _ = repos().PullRequest("", "/w/login", "feat/login", false)
 	assert.True(t, found)
 	assert.Equal(t, model.PRMerged, pr.State)
-	_, found, _ = repos().PullRequest("/w/new", "new", false)
+	_, found, _ = repos().PullRequest("", "/w/new", "new", false)
 	assert.False(t, found, "no pull request is remembered too")
 }
 
@@ -92,14 +93,14 @@ func TestAFreshLookForAPullRequestAsksGitHub(t *testing.T) {
 	gh.EXPECT().PrState("/w/new", "new").Return(model.PullRequestState{Number: 7, State: model.PROpen}, true, nil).Once()
 	repos := sidebarRepos{gh: gh, prs: cache.NewNamespaceInDir[model.PullRequestState](dir, prCacheName, prCacheVersion, prCacheTTL)}
 
-	_, found, _ := repos.PullRequest("/w/new", "new", false)
+	_, found, _ := repos.PullRequest("", "/w/new", "new", false)
 	assert.False(t, found)
-	_, found, _ = repos.PullRequest("/w/new", "new", false)
+	_, found, _ = repos.PullRequest("", "/w/new", "new", false)
 	assert.False(t, found, "cached")
-	pr, found, _ := repos.PullRequest("/w/new", "new", true)
+	pr, found, _ := repos.PullRequest("", "/w/new", "new", true)
 	assert.True(t, found, "past the cache when asked to")
 	assert.Equal(t, 7, pr.Number)
-	pr, found, _ = repos.PullRequest("/w/new", "new", false)
+	pr, found, _ = repos.PullRequest("", "/w/new", "new", false)
 	assert.True(t, found, "and the cache learns it")
 	assert.Equal(t, 7, pr.Number)
 }
@@ -111,9 +112,29 @@ func TestAFailedLookForAPullRequestIsntCached(t *testing.T) {
 	gh.EXPECT().PrState("/w/x", "x").Return(model.PullRequestState{Number: 2, State: model.PROpen}, true, nil).Once()
 	repos := sidebarRepos{gh: gh, prs: cache.NewNamespaceInDir[model.PullRequestState](dir, prCacheName, prCacheVersion, prCacheTTL)}
 
-	_, _, err := repos.PullRequest("/w/x", "x", false)
+	_, _, err := repos.PullRequest("", "/w/x", "x", false)
 	assert.Error(t, err)
-	_, found, err := repos.PullRequest("/w/x", "x", false)
+	_, found, err := repos.PullRequest("", "/w/x", "x", false)
 	require.NoError(t, err)
 	assert.True(t, found, "asked again, not remembered as none")
+}
+
+func TestARemoteThreadsBranchComesFromTheKseshThere(t *testing.T) {
+	rm := remote.NewMockRemote(t)
+	gh := github.NewMockGithub(t)
+	rm.EXPECT().Run("devbox", "", "ksesh", "agent", "branch", "/home/me/api").
+		Return(`{"status":{"branch":"feat/x","base":"origin/main","ahead":2},"origin":"git@github.com:o/api.git"}`, nil)
+	gh.EXPECT().PrStateIn("git@github.com:o/api.git", "feat/x").Return(model.PullRequestState{Number: 5, State: model.PROpen}, true, nil).Once()
+	repos := sidebarRepos{gh: gh, remote: rm, prs: cache.NewNamespaceInDir[model.PullRequestState](t.TempDir(), prCacheName, prCacheVersion, prCacheTTL)}
+
+	st, err := repos.BranchStatus("devbox", "/home/me/api")
+	require.NoError(t, err)
+	assert.Equal(t, model.BranchStatus{Branch: "feat/x", Base: "origin/main", Ahead: 2}, st)
+
+	pr, found, err := repos.PullRequest("devbox", "/home/me/api", "feat/x", false)
+	require.NoError(t, err)
+	assert.True(t, found, "asked of GitHub here, about the repo it pushes to")
+	assert.Equal(t, 5, pr.Number)
+	_, found, _ = repos.PullRequest("devbox", "/home/me/api", "feat/x", false)
+	assert.True(t, found, "and cached")
 }

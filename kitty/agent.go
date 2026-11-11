@@ -26,6 +26,11 @@ const (
 	ConvVar = "ksesh_conv"
 	// TitleVar is a title you gave the thread, shown instead of the window's.
 	TitleVar = "ksesh_title"
+	// HostVar is the machine the agent's hook ran on, and CwdVar its
+	// directory there: for an agent in a `kitten ssh` window, on another
+	// machine, the window's own directory is this machine's.
+	HostVar = "ksesh_host"
+	CwdVar  = "ksesh_cwd"
 	// SeenAtVar is when you last focused the window, set by kitty's watcher
 	// (contrib/ksesh_agents.py): what tells a failure you saw from one you
 	// didn't.
@@ -218,6 +223,12 @@ func (k *RealKitty) UpdateAgent(windowID int, u agent.Update) (*model.Agent, err
 		if u.Conversation != "" {
 			set(ConvVar, u.Conversation)
 		}
+		if u.Host != "" {
+			set(HostVar, u.Host)
+		}
+		if u.Cwd != "" {
+			set(CwdVar, u.Cwd)
+		}
 		if u.Agent != "" {
 			set(AgentVar, u.Agent)
 		}
@@ -298,6 +309,10 @@ func agentOf(w lsWindow) (*model.Agent, bool) {
 		}
 		a.Name, a.Status = cmd, string(agent.Idle)
 		return a, true
+	}
+	if host, ok := remoteHost(w); ok {
+		a.Host = host
+		a.Path = cmp.Or(w.UserVars[CwdVar], a.Path)
 	}
 	a.Name = w.UserVars[AgentVar]
 	a.Conversation = w.UserVars[ConvVar]

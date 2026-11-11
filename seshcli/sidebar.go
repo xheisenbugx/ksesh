@@ -24,6 +24,7 @@ import (
 	"github.com/xheisenbugx/ksesh/github"
 	"github.com/xheisenbugx/ksesh/kitty"
 	"github.com/xheisenbugx/ksesh/model"
+	"github.com/xheisenbugx/ksesh/remote"
 	"github.com/xheisenbugx/ksesh/sidebar"
 	"github.com/xheisenbugx/ksesh/worktree"
 )
@@ -178,9 +179,10 @@ Needs listen_on in kitty.conf: a TUI can't share its tty with remote control.`,
 // requests, cached in a file every tab's sidebar shares, so that one asking
 // GitHub spares the others.
 type sidebarRepos struct {
-	wt  worktree.Worktree
-	gh  github.Github
-	prs *cache.Namespace[model.PullRequestState]
+	wt     worktree.Worktree
+	gh     github.Github
+	remote remote.Remote
+	prs    *cache.Namespace[model.PullRequestState]
 }
 
 // The pull request cache: as long as the sidebar keeps an answer itself.
@@ -193,23 +195,58 @@ const (
 
 func newSidebarRepos(deps *Deps) sidebarRepos {
 	return sidebarRepos{
-		wt: deps.Worktree,
-		gh: deps.Github,
+		wt:     deps.Worktree,
+		gh:     deps.Github,
+		remote: deps.Remote,
 		// A branch without one may get one any time: an agent opens it.
 		prs: cache.NewNamespace[model.PullRequestState](prCacheName, prCacheVersion, prCacheTTL).WithMissingTTL(prMissingTTL),
 	}
 }
 
-func (r sidebarRepos) BranchStatus(dir string) (model.BranchStatus, error) {
-	return r.wt.BranchStatus(dir)
+// BranchStatus asks git, here, or for a thread on another machine, the
+// ksesh there (`ksesh agent branch`).
+func (r sidebarRepos) BranchStatus(host, dir string) (model.BranchStatus, error) {
+	if host == "" {
+		return r.wt.BranchStatus(dir)
+	}
+	b, err := r.remoteBranch(host, dir)
+	return b.Status, err
 }
 
-func (r sidebarRepos) PullRequest(dir, branch string, fresh bool) (model.PullRequestState, bool, error) {
+// remoteBranch is what `ksesh agent branch` says of a directory on host.
+func (r sidebarRepos) remoteBranch(host, dir string) (remoteBranch, error) {
+	out, err := r.remote.Run(host, "", "ksesh", "agent", "branch", dir)
+	if err != nil {
+		return remoteBranch{}, err
+	}
+	var b remoteBranch
+	if err := json.Unmarshal([]byte(out), &b); err != nil {
+		return remoteBranch{}, fmt.Errorf("ksesh on %s: %w", host, err)
+	}
+	return b, nil
+}
+
+// PullRequest asks gh, here: for a thread on another machine, about the
+// repo its directory there pushes to, so only this machine needs gh.
+func (r sidebarRepos) PullRequest(host, dir, branch string, fresh bool) (model.PullRequestState, bool, error) {
 	key := dir + "\x00" + branch
+	if host != "" {
+		key = host + ":" + key
+	}
 	if pr, found, cached := r.prs.Lookup(r.prs.Load(), key); cached && !fresh {
 		return pr, found, nil
 	}
-	pr, found, err := r.gh.PrState(dir, branch)
+	var pr model.PullRequestState
+	var found bool
+	var err error
+	if host == "" {
+		pr, found, err = r.gh.PrState(dir, branch)
+	} else {
+		var b remoteBranch
+		if b, err = r.remoteBranch(host, dir); err == nil {
+			pr, found, err = r.gh.PrStateIn(b.Origin, branch)
+		}
+	}
 	if err != nil {
 		return pr, false, err
 	}

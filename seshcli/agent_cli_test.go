@@ -289,9 +289,10 @@ func TestAgentHookCommand(t *testing.T) {
 		c := newCLI(t, "")
 		t.Setenv("KITTY_WINDOW_ID", "1")
 		t.Setenv("KITTY_LISTEN_ON", "unix:/nonexistent/kitty.sock")
+		t.Setenv("KSESH_HOST", "box")
 		c.kitten(`[{"id":1,"tabs":[{"id":10,"windows":[{"id":1,"title":"✳ Fix the login","session_name":"api","user_vars":{}}]}]}]`,
 			"ls", "--match", "id:1")
-		c.kitten("", "set-user-vars", "--match", "id:1", "ksesh_conv=conv-new", "ksesh_agent=claude", "ksesh_msg",
+		c.kitten("", "set-user-vars", "--match", "id:1", "ksesh_conv=conv-new", "ksesh_host=box", "ksesh_cwd=/c/api", "ksesh_agent=claude", "ksesh_msg",
 			mock.MatchedBy(func(s string) bool { return strings.HasPrefix(s, "ksesh_status_at=") }), "ksesh_status=done")
 		_, stderr, err := c.run("agent", "hook", stop)
 

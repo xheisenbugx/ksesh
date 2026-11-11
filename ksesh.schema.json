@@ -295,6 +295,20 @@
       },
       "additionalProperties": false
     },
+    "host": {
+      "type": "array",
+      "description": "Other machines, reached with ssh, whose directories the session picker lists (ctrl+r) and opens as kitty sessions over `kitten ssh`. Agents started there report to this kitty.",
+      "items": {
+        "type": "object",
+        "required": ["name"],
+        "properties": {
+          "name": { "type": "string", "description": "How ssh reaches it: a Host of ~/.ssh/config, or user@host." },
+          "paths": { "type": "array", "items": { "type": "string" }, "description": "Directories on it to always list, besides those its zoxide knows." },
+          "zoxide": { "type": "boolean", "default": true, "description": "List the directories the host's zoxide knows." }
+        },
+        "additionalProperties": false
+      }
+    },
     "default_session": {
       "type": "object",
       "description": "Default settings applied to all sessions",

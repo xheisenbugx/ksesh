@@ -12,7 +12,10 @@ type ThreadRecord struct {
 	Agent string `json:"agent"`
 	// Cwd is the directory the agent runs in, where it resumes: Claude Code
 	// keeps its conversations by project directory.
-	Cwd        string `json:"cwd,omitempty"`
+	Cwd string `json:"cwd,omitempty"`
+	// Host is the machine Cwd is on, as ssh reaches it, when it isn't this
+	// one.
+	Host       string `json:"host,omitempty"`
 	Transcript string `json:"transcript,omitempty"`
 	// Title is the last title the agent gave its window worth keeping.
 	Title string `json:"title,omitempty"`

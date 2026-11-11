@@ -348,7 +348,12 @@ func (m Model) markSeen() (tea.Model, tea.Cmd) {
 		m.say("can't run ksesh from here")
 		return m, nil
 	}
+	// `ksesh agent set` runs here, against this kitty: in the thread's
+	// directory only when it is on this machine.
 	run, dir, id := m.opts.Run, a.Path, strconv.Itoa(a.WindowID)
+	if a.Host != "" {
+		dir = ""
+	}
 	return m, m.do("marked "+title(a)+" seen", nil, func(Backend) error {
 		return run(dir, "agent", "set", "idle", "--window", id)
 	})

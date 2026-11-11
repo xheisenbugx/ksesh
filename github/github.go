@@ -2,6 +2,7 @@ package github
 
 import (
 	"encoding/json"
+	"fmt"
 	"regexp"
 	"strconv"
 	"strings"
@@ -43,6 +44,9 @@ type Github interface {
 	// out in dir, merged and closed ones included. found is false (with nil
 	// error) when the branch has none.
 	PrState(dir, branch string) (pr model.PullRequestState, found bool, err error)
+	// PrStateIn is PrState for a repo named by its remote's URL rather than a
+	// directory of it here: a repo on another machine.
+	PrStateIn(remoteURL, branch string) (pr model.PullRequestState, found bool, err error)
 	// PrCheckout runs `gh pr checkout` inside dir (a worktree).
 	PrCheckout(dir string, repo string, number int) (string, error)
 	// Issue returns the GitHub issue for the branch checked out at path.
@@ -119,9 +123,23 @@ func (g *RealGithub) PrURL(dir string) (string, bool, error) {
 // failing (offline, signed out, rate limited) is, so that it isn't taken for
 // a branch without one.
 func (g *RealGithub) PrState(dir, branch string) (model.PullRequestState, bool, error) {
+	return g.prState(func(args ...string) (string, error) { return g.shell.CmdInDir(dir, "gh", args...) }, branch)
+}
+
+func (g *RealGithub) PrStateIn(remoteURL, branch string) (model.PullRequestState, bool, error) {
+	repo, ok := RepoOf(remoteURL)
+	if !ok {
+		return model.PullRequestState{}, false, fmt.Errorf("not a GitHub repo: %s", remoteURL)
+	}
+	return g.prState(func(args ...string) (string, error) {
+		return g.shell.CmdCapture("gh", append(args, "--repo", repo)...)
+	}, branch)
+}
+
+func (g *RealGithub) prState(gh func(args ...string) (string, error), branch string) (model.PullRequestState, bool, error) {
 	// Named, rather than gh's current branch: the answer is about the branch
 	// asked about even if another was checked out since.
-	out, err := g.shell.CmdInDir(dir, "gh", "pr", "view", branch, "--json", "number,state,isDraft,url")
+	out, err := gh("pr", "view", branch, "--json", "number,state,isDraft,url")
 	if err != nil {
 		if strings.Contains(err.Error(), "no pull requests found") {
 			return model.PullRequestState{}, false, nil
@@ -141,6 +159,28 @@ func (g *RealGithub) PrState(dir, branch string) (model.PullRequestState, bool, 
 		return model.PullRequestState{}, false, err
 	}
 	return model.PullRequestState{Number: raw.Number, State: raw.State, Draft: raw.IsDraft, URL: raw.URL}, raw.Number != 0, nil
+}
+
+// RepoOf is the HOST/OWNER/REPO gh's --repo takes, from a git remote's URL:
+// git@github.com:o/r.git, https://github.com/o/r, ssh://git@host/o/r.git.
+func RepoOf(remoteURL string) (string, bool) {
+	u := strings.TrimSuffix(strings.TrimSpace(remoteURL), ".git")
+	if rest, ok := strings.CutPrefix(u, "ssh://"); ok {
+		u = rest
+	} else if i := strings.Index(u, "://"); i >= 0 {
+		u = u[i+3:]
+	} else if at := strings.Index(u, "@"); at >= 0 {
+		u = strings.Replace(u[at+1:], ":", "/", 1)
+	}
+	if at := strings.Index(u, "@"); at >= 0 {
+		u = u[at+1:]
+	}
+	host, path, ok := strings.Cut(u, "/")
+	if !ok || strings.Count(path, "/") != 1 || host == "" {
+		return "", false
+	}
+	host, _, _ = strings.Cut(host, ":") // a port
+	return host + "/" + path, true
 }
 
 var issueNumberRe = regexp.MustCompile(`\d+`)

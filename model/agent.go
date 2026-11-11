@@ -17,6 +17,10 @@ type Agent struct {
 	// for a window outside any session.
 	Session string `json:"session"`
 	Path    string `json:"path"`
+	// Host is the machine the agent runs on, as ssh reaches it, when it
+	// isn't this one: an agent in a `kitten ssh` window. Path is then on
+	// that machine.
+	Host string `json:"host,omitempty"`
 	// Name is the agent ("claude"), or the program running in the window when
 	// the agent was found by its process rather than its hooks.
 	Name    string     `json:"name"`

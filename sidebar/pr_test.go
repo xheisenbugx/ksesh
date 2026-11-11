@@ -124,8 +124,8 @@ func lookupModel(t *testing.T) (Model, *MockRepos, *[]string) {
 
 func TestPLooksForAPullRequestItDoesntKnowYet(t *testing.T) {
 	m, repos, opened := lookupModel(t)
-	repos.EXPECT().BranchStatus("/w/2").Return(model.BranchStatus{Branch: "docs", Base: "origin/main"}, nil).Once()
-	repos.EXPECT().PullRequest("/w/2", "docs", true).Return(model.PullRequestState{Number: 12, State: model.PROpen, URL: prURL}, true, nil).Once()
+	repos.EXPECT().BranchStatus("", "/w/2").Return(model.BranchStatus{Branch: "docs", Base: "origin/main"}, nil).Once()
+	repos.EXPECT().PullRequest("", "/w/2", "docs", true).Return(model.PullRequestState{Number: 12, State: model.PROpen, URL: prURL}, true, nil).Once()
 
 	m, cmd := press(t, m, "P")
 	assert.Contains(t, m.flash, "looking for its pull request")
@@ -155,9 +155,9 @@ func TestPSaysWhyThereIsNoPullRequest(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			m, repos, opened := lookupModel(t)
-			repos.EXPECT().BranchStatus("/w/2").Return(c.status, nil).Once()
+			repos.EXPECT().BranchStatus("", "/w/2").Return(c.status, nil).Once()
 			if c.status.Branch != "" && !c.status.OnBase {
-				repos.EXPECT().PullRequest("/w/2", "docs", true).Return(model.PullRequestState{}, false, c.prErr).Once()
+				repos.EXPECT().PullRequest("", "/w/2", "docs", true).Return(model.PullRequestState{}, false, c.prErr).Once()
 			}
 			m, cmd := press(t, m, "P")
 			m, _ = update(m, cmd())

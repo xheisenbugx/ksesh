@@ -13,6 +13,7 @@ import (
 var strategies = []func(*RealConnector, string) (model.Connection, error){
 	kittyWindowStrategy,
 	kittyStrategy,
+	hostStrategy,
 	sessionFileStrategy,
 	configStrategy,
 	configWildcardStrategy,
@@ -47,6 +48,7 @@ func (c *RealConnector) Connect(name string, opts model.ConnectOpts) (string, er
 		"config_wildcard": connectToKitty,
 		"dir":             connectToKitty,
 		"zoxide":          connectToKitty,
+		"host":            connectToHost,
 	}
 
 	connection, err := c.Resolve(name)

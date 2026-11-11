@@ -9,6 +9,7 @@ import (
 	"github.com/xheisenbugx/ksesh/home"
 	"github.com/xheisenbugx/ksesh/kitty"
 	"github.com/xheisenbugx/ksesh/model"
+	"github.com/xheisenbugx/ksesh/remote"
 	"github.com/xheisenbugx/ksesh/sessionfile"
 	"github.com/xheisenbugx/ksesh/zoxide"
 )
@@ -35,6 +36,8 @@ type RealLister struct {
 	sessionfile sessionfile.SessionFile
 	formatter   formatter.Formatter
 	issues      *cache.Namespace[github.Issue]
+	// remote lists the [[host]]s' directories; nil lists none.
+	remote remote.Remote
 
 	// wildcards caches config.WildcardConfigs with their patterns expanded, so
 	// resolving a wildcard for every session in a list expands each pattern
@@ -51,8 +54,9 @@ func NewLister(
 	sessionfile sessionfile.SessionFile,
 	formatter formatter.Formatter,
 	issues *cache.Namespace[github.Issue],
+	options ...Option,
 ) Lister {
-	return &RealLister{
+	l := &RealLister{
 		config:      config,
 		home:        home,
 		kitty:       kitty,
@@ -61,4 +65,16 @@ func NewLister(
 		formatter:   formatter,
 		issues:      issues,
 	}
+	for _, o := range options {
+		o(l)
+	}
+	return l
+}
+
+// Option sets up a lister beyond what every lister needs.
+type Option func(*RealLister)
+
+// WithRemote lists the [[host]]s' directories through r.
+func WithRemote(r remote.Remote) Option {
+	return func(l *RealLister) { l.remote = r }
 }

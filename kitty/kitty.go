@@ -47,6 +47,13 @@ type Kitty interface {
 	// NewSession creates a session with one tab rooted at startDir, without
 	// focusing it. It returns the "window:<id>" target of its window.
 	NewSession(sessionName string, startDir string) (string, error)
+	// NewSessionWith is NewSession running command (a shell command line,
+	// empty for the shell) in its window, with these user variables set
+	// on it.
+	NewSessionWith(sessionName, startDir, command string, vars map[string]string) (string, error)
+	// WaitForPrompt waits, up to timeout, until the shell of a "window:<id>"
+	// target is at its prompt: a shell over ssh takes a moment to be up.
+	WaitForPrompt(target string, timeout time.Duration) error
 	// NewWindowInSession creates a tab in a session and returns the
 	// "window:<id>" target of its window.
 	NewWindowInSession(opts model.KittyTabOpts) (string, error)
