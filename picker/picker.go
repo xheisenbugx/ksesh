@@ -17,7 +17,7 @@ import (
 )
 
 const (
-	defaultPrompt              = "> "
+	defaultPrompt              = "› "
 	defaultPlaceholder         = "Filter sessions..."
 	defaultWorktreePlaceholder = "Filter worktrees..."
 )
@@ -31,6 +31,10 @@ type PickerOptions struct {
 	DisableAliasAutoConnect *bool
 	Preview                 *bool
 	Query                   *string
+	// Sources are the lists the picker's tabs switch between, the first one
+	// current; it should list what the fetchFunc given to Pick does. Empty
+	// shows no tabs.
+	Sources []Source
 }
 
 // WorktreePickerOptions overrides the configured defaults for a single
@@ -277,6 +281,7 @@ func (p *RealPicker) Pick(fetchFunc FetchFunc, opts PickerOptions) (string, erro
 		GroupSeparator:          p.config.TUI.GroupSeparator,
 		Remove:                  removeFunc,
 		Kill:                    killFunc,
+		Sources:                 opts.Sources,
 	})
 	// Over the tty, kitty can't be reached while the TUI owns the terminal;
 	// see kitty.Freeze. Thawing on return lets the connect that follows the

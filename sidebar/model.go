@@ -3,17 +3,20 @@ package sidebar
 import (
 	"fmt"
 	"image/color"
+	"maps"
 	"slices"
 	"strconv"
 	"strings"
 	"time"
 
 	"charm.land/bubbles/v2/textinput"
+	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/xheisenbugx/ksesh/agent"
 	"github.com/xheisenbugx/ksesh/kitty"
 	"github.com/xheisenbugx/ksesh/model"
+	"github.com/xheisenbugx/ksesh/ui"
 )
 
 // Backend is the part of kitty the sidebar drives. kitty.Kitty is one.
@@ -78,6 +81,15 @@ type Options struct {
 	// Dock is how the sidebar is docked, for < and > to dock it again at a
 	// new width: kitty can't resize a dock. Without a Command it can't.
 	Dock kitty.SidebarOpts
+
+	// Picker runs the list as a full window picker over a window, rather
+	// than docked: typing filters, the keys are ctrl and alt ones, the
+	// selected thread's screen (or its diff) shows beside the list, and
+	// going to a thread quits.
+	Picker bool
+	// Preview draws a thread for the picker's preview pane, width columns
+	// wide: its screen, or with diff, its review. Nil shows none.
+	Preview func(a *model.Agent, diff bool, width int) (Preview, error)
 }
 
 // How often the sidebar asks kitty what changed: often while it is on
@@ -172,7 +184,7 @@ type Model struct {
 	// written, so its copy of the state is stale.
 	stateSeq int
 
-	th      theme
+	th      ui.Theme
 	bg, fgc color.Color // the terminal's, once it says
 	hover   string      // key of the row under the mouse
 	// hoverButton is which of the hovered thread's buttons the mouse is on,
@@ -187,6 +199,25 @@ type Model struct {
 	resizing bool
 	// helpOffset is the first line of the help screen shown.
 	helpOffset int
+
+	keys keyMap
+	// query is the picker's filter, typed into at any time.
+	query textinput.Model
+	// The picker's preview pane: whether it is on, showing the diff rather
+	// than the screen, the thread it shows (by row key), and a count of the
+	// fetches asked for, so a late one can be told apart.
+	preview     viewport.Model
+	previewOn   bool
+	previewDiff bool
+	previewKey  string
+	previewSeq  int
+	// previewFor is the thread whose preview the pane holds, previewHeader
+	// the lines kept over its viewport.
+	previewFor    string
+	previewHeader []string
+	// opened are the shelves open in the picker, which leaves the sidebars'
+	// own alone.
+	opened map[agent.Section]bool
 }
 
 func New(opts Options) Model {
@@ -195,8 +226,21 @@ func New(opts Options) Model {
 	}
 	in := textinput.New()
 	in.Prompt = "› "
-	return Model{opts: opts, input: in, now: opts.Now(), shown: true, th: themeFor(nil, nil), hoverButton: -1,
-		branches: map[string]*branchInfo{}, autoSettled: map[int]time.Time{}}
+	m := Model{opts: opts, input: in, now: opts.Now(), shown: true, th: ui.ThemeFor(nil, nil), hoverButton: -1,
+		branches: map[string]*branchInfo{}, autoSettled: map[int]time.Time{}, keys: sidebarKeys()}
+	if opts.Picker {
+		m.keys = pickerKeys()
+		m.query = textinput.New()
+		m.query.Prompt = "› "
+		m.query.Placeholder = "filter by title, session or branch"
+		m.query.Focus()
+		m.preview = viewport.New()
+		m.previewOn = opts.Preview != nil
+		m.focused = true
+		m.opened = map[agent.Section]bool{agent.SectionWorking: true, agent.Snoozed: true, agent.Settled: true}
+	}
+	m.styleInputs()
+	return m
 }
 
 // Restart reports whether the sidebar quit to restart into a new ksesh.
@@ -239,7 +283,11 @@ type (
 )
 
 func (m Model) Init() tea.Cmd {
-	return tea.Batch(m.load(true), tea.RequestBackgroundColor, tea.RequestForegroundColor)
+	cmds := []tea.Cmd{m.load(true), tea.RequestBackgroundColor, tea.RequestForegroundColor}
+	if m.opts.Picker {
+		cmds = append(cmds, m.query.Focus())
+	}
+	return tea.Batch(cmds...)
 }
 
 // load asks kitty for every agent and where the sidebar is. Only the load a
@@ -264,22 +312,50 @@ func (m Model) load(tick bool) tea.Cmd {
 }
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	next, cmd := m.update(msg)
+	if m, ok := next.(Model); ok && m.opts.Picker {
+		var preview tea.Cmd
+		m, preview = m.syncPreview()
+		return m, tea.Batch(cmd, preview)
+	}
+	return next, cmd
+}
+
+func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
 		m.input.SetWidth(max(m.width-4, 1))
+		m.query.SetWidth(max(m.width-4, 1))
+		m.sizePreview()
 		m.scrollToCursor()
 		return m, nil
+	case previewMsg:
+		return m.showPreview(msg), nil
+	case previewTickMsg:
+		return m, m.fetchPreview(msg)
 	case tea.FocusMsg:
 		m.focused = true
 		return m, m.load(false)
 	case tea.BackgroundColorMsg:
 		m.bg = msg.Color
-		m.th = themeFor(m.bg, m.fgc)
+		m.th = ui.ThemeFor(m.bg, m.fgc)
+		m.styleInputs()
 		return m, nil
 	case tea.ForegroundColorMsg:
 		m.fgc = msg.Color
-		m.th = themeFor(m.bg, m.fgc)
+		m.th = ui.ThemeFor(m.bg, m.fgc)
+		m.styleInputs()
+		return m, nil
+	case tea.PasteMsg:
+		if _, ok := inputs[m.mode]; ok {
+			var cmd tea.Cmd
+			m.input, cmd = m.input.Update(msg)
+			return m, cmd
+		}
+		if m.opts.Picker && m.mode == modeNormal {
+			return m.typeQuery(msg)
+		}
 		return m, nil
 	case tea.MouseMotionMsg:
 		if m.mode == modeMenu {
@@ -290,7 +366,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.hover, m.hoverButton = "", -1
 		m.hoverNew = m.onNewButton(msg.X, msg.Y)
-		if r, nth, ok := m.lineAt(msg.Y); ok && r.selectable() {
+		if r, nth, ok := m.lineAt(msg.Y); ok && r.selectable() && msg.X < m.cols() {
 			m.hover = rowKey(r)
 			if nth == 0 {
 				m.hoverButton = m.buttonAt(r, msg.X)
@@ -306,7 +382,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Tick(spinEvery, func(time.Time) tea.Msg { return animMsg{} })
 	case tea.BlurMsg:
 		m.hover, m.hoverButton, m.hoverNew = "", -1, false
-		m.focused = false
+		m.focused = m.opts.Picker
 		if m.mode != modeNormal && m.mode != modeHelp {
 			m.mode = modeNormal
 		}
@@ -334,12 +410,20 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.state = msg.state
 			}
 			// kitty says who has the focus too: a sidebar opened beside your
-			// window, without the focus, gets no focus event to say so.
-			m.focused = msg.focused
+			// window, without the focus, gets no focus event to say so. A
+			// picker always has it.
+			m.focused = msg.focused || m.opts.Picker
+			m.shown = m.shown || m.opts.Picker
 			m.loaded = true
 			m.keepCursor()
 		}
 		cmds := m.refreshBranches()
+		if msg.err == nil && m.opts.Picker && !m.previewDiff {
+			// The screen moved on: show it again.
+			if cmd := m.refetchPreview(); cmd != nil {
+				cmds = append(cmds, cmd)
+			}
+		}
 		if msg.err == nil {
 			cmds = append(cmds, m.settleMerged()...)
 		}
@@ -386,6 +470,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.MouseClickMsg:
 		return m.click(msg)
 	case tea.MouseWheelMsg:
+		if m.opts.Picker && m.mode != modeHelp && msg.X >= m.cols() {
+			if msg.Button == tea.MouseWheelUp {
+				m.preview.ScrollUp(3)
+			} else if msg.Button == tea.MouseWheelDown {
+				m.preview.ScrollDown(3)
+			}
+			return m, nil
+		}
 		if m.mode == modeHelp {
 			if msg.Button == tea.MouseWheelUp {
 				m.scrollHelp(-1)
@@ -412,9 +504,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.keyConfirmArchive(msg)
 		case modeHelp:
 			switch msg.String() {
-			case "j", "down", "ctrl+n":
+			case "j", "down", "ctrl+n", "ctrl+j":
 				m.scrollHelp(1)
-			case "k", "up", "ctrl+p":
+			case "k", "up", "ctrl+p", "ctrl+k":
 				m.scrollHelp(-1)
 			default:
 				m.mode, m.helpOffset = modeNormal, 0
@@ -454,8 +546,16 @@ func (m Model) board() agent.Board {
 	return agent.Arrange(agents, m.now, m.opts.ThreadOpts)
 }
 
+// expanded is which shelves are open: the sidebars', or the picker's own.
+func (m Model) expanded() map[agent.Section]bool {
+	if m.opts.Picker {
+		return m.opened
+	}
+	return m.state.Expanded
+}
+
 func (m Model) rows() []row {
-	rows := layout(m.board(), m.state.Expanded, m.allSettled, m.current)
+	rows := layout(m.board(), m.expanded(), m.allSettled, m.current)
 	if m.state.Group {
 		rows = groupInbox(rows)
 	}
@@ -485,8 +585,8 @@ func (m Model) rowAt(y int) (row, bool) {
 // is.
 func (m Model) lineAt(y int) (row, int, bool) {
 	lines := m.lineRows()
-	i := y - headerLines + m.offset
-	if y < headerLines || i < 0 || i >= len(lines) || y >= headerLines+m.listHeight() {
+	i := y - m.top() + m.offset
+	if y < m.top() || i < 0 || i >= len(lines) || y >= m.top()+m.listHeight() {
 		return row{}, 0, false
 	}
 	nth := 0
@@ -502,10 +602,10 @@ func (m Model) rowY(key string) int {
 	rows := m.rows()
 	for i, ri := range m.lineRows() {
 		if rowKey(rows[ri]) == key && i >= m.offset && i < m.offset+m.listHeight() {
-			return headerLines + i - m.offset
+			return m.top() + i - m.offset
 		}
 	}
-	return headerLines + m.listHeight() - 1
+	return m.top() + m.listHeight() - 1
 }
 
 func (m Model) selected() (row, int, bool) {
@@ -650,54 +750,67 @@ func (m *Model) nextSection(delta int) {
 }
 
 func (m Model) keyNormal(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
-	return m.run(msg.String())
+	a := m.keys.match(msg)
+	if a == actNth {
+		return m.gotoNth(int(msg.String()[0] - '0'))
+	}
+	if a == actNone && m.opts.Picker {
+		return m.typeQuery(msg)
+	}
+	return m.run(a)
 }
 
-// run does what a key does. The context menu and the buttons on a thread
-// run their actions through it too, so each is done one way.
-func (m Model) run(key string) (tea.Model, tea.Cmd) {
-	if a, ok := m.selectedAgent(); ok && a.Closed {
-		switch key {
-		case "p", "s", "z", "w", "a", "y", "x", "r", "d", "R", "A", "K", "J", "shift+up", "shift+down":
-			m.say("it's closed: ↵ resumes it")
-			return m, nil
-		}
+// closedActs are what can't be done to a closed thread, which has no window:
+// it can only be resumed or forgotten.
+var closedActs = []act{actSeen, actPin, actSettle, actSnooze, actWake, actApprove, actDeny, actReply, actReview, actPager,
+	actRename, actArchive, actPinUp, actPinDown}
+
+// run does an act. Keys, the context menu and the buttons on a thread all
+// run their actions through it, so each is done one way.
+func (m Model) run(do act) (tea.Model, tea.Cmd) {
+	if a, ok := m.selectedAgent(); ok && a.Closed && slices.Contains(closedActs, do) {
+		m.say("it's closed: " + m.keys.label(actGo) + " resumes it")
+		return m, nil
 	}
-	switch key {
-	case "j", "down", "ctrl+n":
+	switch do {
+	case actDown:
 		m.move(1)
-	case "k", "up", "ctrl+p":
+	case actUp:
 		m.move(-1)
-	case "g", "home":
+	case actTop:
 		m.jump(false)
-	case "G", "end":
+	case actBottom:
 		m.jump(true)
-	case "tab":
+	case actNextSection:
 		m.nextSection(1)
-	case "shift+tab":
+	case actPrevSection:
 		m.nextSection(-1)
-	case "enter", "l", "right":
+	case actGo:
 		return m.activate()
-	case "space":
+	case actOpen:
 		if r, _, ok := m.selected(); ok && r.kind != rowThread {
 			return m.activate()
 		}
-	case "esc", "h", "left":
-		if key == "esc" && m.filter != "" {
+	case actBack:
+		if m.filter != "" {
 			m.filter = ""
+			m.query.SetValue("")
 			m.keepCursor()
 			return m, nil
 		}
+		if m.opts.Picker {
+			return m, tea.Quit
+		}
 		return m, m.backToWork()
-	case "/":
+	case actQuit:
+		return m, tea.Quit
+	case actFilter:
 		return m.prompt(modeFilter, m.filter)
-	case "1", "2", "3", "4", "5", "6", "7", "8", "9":
-		return m.gotoNth(int(key[0] - '0'))
-	case "<":
+	case actNarrow:
 		return m.resize(-resizeStep)
-	case ">":
+	case actWiden:
 		return m.resize(resizeStep)
-	case "o":
+	case actGroup:
 		m.stateSeq++
 		st, err := UpdateState(m.opts.StatePath, func(s *State) { s.Group = !s.Group })
 		if err != nil {
@@ -706,27 +819,27 @@ func (m Model) run(key string) (tea.Model, tea.Cmd) {
 			m.state = st
 			m.keepCursor()
 		}
-	case "p":
+	case actPin:
 		return m.pin()
-	case "s":
+	case actSettle:
 		return m.settle()
-	case "z":
+	case actSnooze:
 		if a, ok := m.selectedAgent(); ok {
 			if agent.IsSnoozed(a.Thread, m.now) {
-				m.say("w wakes it")
+				m.say(m.keys.label(actWake) + " wakes it")
 				return m, nil
 			}
 			m.mode = modeSnooze
 		}
-	case "w":
+	case actWake:
 		return m.wake()
-	case "K", "shift+up":
+	case actPinUp:
 		return m.movePin(-1)
-	case "J", "shift+down":
+	case actPinDown:
 		return m.movePin(1)
-	case "u", "ctrl+z":
+	case actUndo:
 		return m.undoLast()
-	case "a", "y":
+	case actApprove:
 		if a, ok := m.selectedAgent(); ok {
 			if agent.Status(a.Status) != agent.Waiting {
 				m.say("it isn't waiting on you")
@@ -734,7 +847,7 @@ func (m Model) run(key string) (tea.Model, tea.Cmd) {
 			}
 			return m, m.do(fmt.Sprintf("approved %s", title(a)), nil, func(b Backend) error { return b.SendKey(a.WindowID, "enter") })
 		}
-	case "x":
+	case actDeny:
 		if a, ok := m.selectedAgent(); ok {
 			what := "interrupted"
 			if agent.Status(a.Status) == agent.Waiting {
@@ -742,27 +855,40 @@ func (m Model) run(key string) (tea.Model, tea.Cmd) {
 			}
 			return m, m.do(what+" "+title(a), nil, func(b Backend) error { return b.SendKey(a.WindowID, "escape") })
 		}
-	case "r":
+	case actReply:
 		if _, ok := m.selectedAgent(); ok {
 			return m.prompt(modeReply, "")
 		}
-	case "d":
+	case actReview:
+		if m.opts.Picker {
+			return m.toggleDiff()
+		}
 		return m.review()
-	case "P":
+	case actPager:
+		return m.pager()
+	case actTogglePreview:
+		return m.togglePreview()
+	case actPreviewDown:
+		m.preview.HalfPageDown()
+	case actPreviewUp:
+		m.preview.HalfPageUp()
+	case actPR:
 		return m.openPR()
-	case "n":
+	case actSeen:
+		return m.markSeen()
+	case actNew:
 		return m.startNewThread(false)
-	case "N":
+	case actNewWorktree:
 		return m.startNewThread(true)
-	case "R":
+	case actRename:
 		if a, ok := m.selectedAgent(); ok {
 			return m.prompt(modeRename, a.CustomTitle)
 		}
-	case "X":
+	case actClose:
 		if _, ok := m.selectedAgent(); ok {
 			m.mode = modeConfirmClose
 		}
-	case "A":
+	case actArchive:
 		if a, ok := m.selectedAgent(); ok {
 			if _, ok := m.archivable(a); !ok {
 				m.say("not in a worktree of its own")
@@ -770,7 +896,7 @@ func (m Model) run(key string) (tea.Model, tea.Cmd) {
 			}
 			m.mode = modeConfirmArchive
 		}
-	case "f":
+	case actScope:
 		m.stateSeq++
 		st, err := UpdateState(m.opts.StatePath, func(s *State) { s.Session = !s.Session })
 		if err != nil {
@@ -779,7 +905,7 @@ func (m Model) run(key string) (tea.Model, tea.Cmd) {
 			m.state = st
 			m.keepCursor()
 		}
-	case "q":
+	case actHide:
 		path := m.opts.StatePath
 		return m, m.do("", nil, func(b Backend) error {
 			if _, err := UpdateState(path, func(s *State) { s.Enabled = false }); err != nil {
@@ -787,9 +913,9 @@ func (m Model) run(key string) (tea.Model, tea.Cmd) {
 			}
 			return b.CloseSidebars()
 		})
-	case "?":
+	case actHelp:
 		m.mode = modeHelp
-	case "m", "menu":
+	case actMenu:
 		if r, _, ok := m.selected(); ok && r.kind == rowThread {
 			return m.openThreadMenu(r.agent, 4, m.rowY(rowKey(r))), nil
 		}
@@ -808,12 +934,21 @@ func (m Model) activate() (tea.Model, tea.Cmd) {
 	case rowThread:
 		if a := r.agent; a.Closed {
 			conv := a.Conversation
-			return m, m.do("resuming "+title(a), nil, func(b Backend) error { return b.ResumeThread(conv) })
+			return m, m.doQuit("resuming "+title(a), func(b Backend) error { return b.ResumeThread(conv) })
 		}
 		id := r.agent.WindowID
-		return m, m.do("", nil, func(b Backend) error { return b.FocusWindow(id) })
+		return m, m.doQuit("", func(b Backend) error { return b.FocusWindow(id) })
 	case rowHeader:
-		open := !m.state.Expanded[r.section]
+		open := !m.expanded()[r.section]
+		if m.opts.Picker {
+			m.opened = maps.Clone(m.opened)
+			m.opened[r.section] = open
+			if !open && r.section == agent.Settled {
+				m.allSettled = false
+			}
+			m.keepCursor()
+			return m, nil
+		}
 		m.stateSeq++
 		st, err := UpdateState(m.opts.StatePath, func(s *State) {
 			if s.Expanded == nil {
@@ -846,6 +981,19 @@ func (m Model) backToWork() tea.Cmd {
 		}
 		return b.FocusPlain(id)
 	})
+}
+
+// doQuit is do for going somewhere: the picker quits once it went, the
+// sidebar stays.
+func (m Model) doQuit(flash string, action func(Backend) error) tea.Cmd {
+	if !m.opts.Picker {
+		return m.do(flash, nil, action)
+	}
+	b := m.opts.Backend
+	return func() tea.Msg {
+		err := action(b)
+		return doneMsg{flash: flash, err: err, quit: err == nil}
+	}
 }
 
 // do runs an action against kitty off the UI loop, then refreshes.
@@ -1012,10 +1160,10 @@ func (m Model) click(msg tea.MouseClickMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	if msg.Button == tea.MouseLeft && m.onNewButton(msg.X, msg.Y) {
-		return m.run("n")
+		return m.run(actNew)
 	}
 	r, nth, ok := m.lineAt(msg.Y)
-	if !ok || !r.selectable() {
+	if !ok || !r.selectable() || msg.X >= m.cols() {
 		return m, nil
 	}
 	m.cursor = rowKey(r)

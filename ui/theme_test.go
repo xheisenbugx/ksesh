@@ -1,4 +1,4 @@
-package sidebar
+package ui
 
 import (
 	"image/color"
@@ -38,23 +38,23 @@ func TestTheThemeStaysLegible(t *testing.T) {
 	for name, s := range schemes {
 		t.Run(name, func(t *testing.T) {
 			bg, fg := lipgloss.Color(s[0]), lipgloss.Color(s[1])
-			th := themeFor(bg, fg)
+			th := ThemeFor(bg, fg)
 			own := contrast(fg, bg)
 			// Secondary text reads as well as small text should (WCAG AA), or
 			// as well as the scheme's own text when that is lower.
-			assert.GreaterOrEqual(t, contrast(colorOf(t, th.muted), bg), min(4.5, own))
-			assert.GreaterOrEqual(t, contrast(colorOf(t, th.heading), bg), min(6, own))
-			assert.GreaterOrEqual(t, contrast(colorOf(t, th.subtle), bg), min(1.8, own))
+			assert.GreaterOrEqual(t, contrast(colorOf(t, th.Muted), bg), min(4.5, own))
+			assert.GreaterOrEqual(t, contrast(colorOf(t, th.Heading), bg), min(6, own))
+			assert.GreaterOrEqual(t, contrast(colorOf(t, th.Subtle), bg), min(1.8, own))
 			// The text stays quieter than the scheme's own.
-			assert.Less(t, contrast(colorOf(t, th.muted), bg), own+0.01)
+			assert.Less(t, contrast(colorOf(t, th.Muted), bg), own+0.01)
 		})
 	}
 }
 
 func TestADarkThemeKeepsItsMix(t *testing.T) {
 	bg, fg := lipgloss.Color("#1c1c22"), lipgloss.Color("#e4e2ea")
-	th := themeFor(bg, fg)
-	assert.Equal(t, fgSGR(mix(bg, fg, 0.58)), th.muted)
-	assert.Equal(t, fgSGR(mix(bg, fg, 0.24)), th.subtle)
-	assert.Equal(t, fgSGR(mix(bg, fg, 0.72)), th.heading)
+	th := ThemeFor(bg, fg)
+	assert.Equal(t, fgSGR(mix(bg, fg, 0.58)), th.Muted)
+	assert.Equal(t, fgSGR(mix(bg, fg, 0.24)), th.Subtle)
+	assert.Equal(t, fgSGR(mix(bg, fg, 0.72)), th.Heading)
 }

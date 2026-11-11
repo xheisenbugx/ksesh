@@ -422,7 +422,7 @@ func TestView_UsesTerminalCursorAfterQuery(t *testing.T) {
 	c := m.View().Cursor
 	assert.NotNil(t, c)
 	assert.Equal(t, len("  > dot"), c.X)
-	assert.Equal(t, 0, c.Y)
+	assert.Equal(t, filterRow, c.Y, "the filter sits under the masthead and the tabs")
 	assert.False(t, c.Blink)
 	assert.Nil(t, c.Color)
 	assert.NotContains(t, m.View().Content, "\x1b[7m", "the virtual cursor would draw itself in reverse video")
@@ -487,7 +487,7 @@ func TestScrolling(t *testing.T) {
 	m := newTestModel()
 	// Short enough that the five test sessions can't all fit at once, which is
 	// what makes the list scroll at all.
-	m.height = 6
+	m.height = headerLines + footerLines + 3
 
 	visible := m.visibleCount()
 	require.Less(t, visible, len(m.filtered), "the list must overflow to scroll")
@@ -718,7 +718,9 @@ func iconRow(t *testing.T, m Model, name string) string {
 	t.Helper()
 	for _, line := range strings.Split(ansi.Strip(fmt.Sprintf("%v", m.View())), "\n") {
 		if strings.Contains(line, name) {
-			return line
+			// Rows are padded out to the list's width: what is measured is
+			// where the name ends.
+			return strings.TrimRight(line, " ")
 		}
 	}
 	t.Fatalf("expected a row for the %s session", name)
@@ -1863,7 +1865,7 @@ func TestPreview_LongContentIsClipped(t *testing.T) {
 	m = loadPreview(t, result.(Model), cmd)
 
 	lines := strings.Split(m.View().Content, "\n")
-	assert.Len(t, lines, headerLines+m.visibleCount(),
+	assert.Len(t, lines, headerLines+m.visibleCount()+footerLines,
 		"an oversized preview must not grow the picker")
 	for i, line := range lines {
 		assert.LessOrEqual(t, lipgloss.Width(line), m.width,
@@ -2085,16 +2087,16 @@ func TestView_IndexModeNumbersRows(t *testing.T) {
 	m.width, m.height = 60, 24
 
 	plain := ansi.Strip(m.View().Content)
-	assert.Contains(t, plain, "> my-project", "the gutter is only drawn in index mode")
+	assert.Contains(t, plain, "▌ my-project", "the gutter is only drawn in index mode")
 
 	m = filterIndexMode(m, "")
 	plain = ansi.Strip(m.View().Content)
-	assert.Contains(t, plain, "> 1 my-project")
+	assert.Contains(t, plain, "▌ 1 my-project")
 	assert.Contains(t, plain, "  2 dotfiles")
 }
 
 func TestIndexGutter_RunsOutAfterNine(t *testing.T) {
-	style := lipgloss.NewStyle()
+	style := func(s string) string { return s }
 	assert.Equal(t, "9 ", indexGutter(maxIndexJump-1, style))
 	assert.Equal(t, "  ", indexGutter(maxIndexJump, style),
 		"rows past the ninth are unreachable, and blanks keep the names aligned")
@@ -2132,17 +2134,24 @@ func TestGroupSeparator_DrawnBetweenGroups(t *testing.T) {
 	assert.True(t, m.rows[2].separator)
 	assert.Equal(t, []int{0, 1, 3, 4, 5}, m.rowOf)
 
+	lines := listOf(m)
+	assert.Contains(t, lines[1], "notes")
+	assert.Contains(t, lines[2], "─")
+	assert.Contains(t, lines[3], "dotfiles")
+}
+
+// listOf is the lines of the list in the picker's frame, without the
+// masthead, the tabs, the filter and the status bar, ANSI stripped.
+func listOf(m Model) []string {
 	lines := strings.Split(ansi.Strip(m.View().Content), "\n")
-	assert.Contains(t, lines[3], "notes")
-	assert.Contains(t, lines[4], "─")
-	assert.Contains(t, lines[5], "dotfiles")
+	return lines[headerLines : len(lines)-footerLines]
 }
 
 func TestGroupSeparator_OffByDefault(t *testing.T) {
 	m := newGroupedTestModel(false)
 
 	assert.Len(t, m.rows, 5)
-	assert.NotContains(t, ansi.Strip(m.View().Content), "─")
+	assert.NotContains(t, strings.Join(listOf(m), "\n"), "─")
 }
 
 func TestGroupSeparator_SuppressedWhileFiltering(t *testing.T) {
@@ -2154,7 +2163,7 @@ func TestGroupSeparator_SuppressedWhileFiltering(t *testing.T) {
 	for _, row := range m.rows {
 		assert.False(t, row.separator, "no rule while the list is reordered by match quality")
 	}
-	assert.NotContains(t, ansi.Strip(m.View().Content), "─")
+	assert.NotContains(t, strings.Join(listOf(m), "\n"), "─")
 }
 
 func TestGroupSeparator_CursorSkipsIt(t *testing.T) {
@@ -2176,13 +2185,13 @@ func TestGroupSeparator_ScrollCountsTheRule(t *testing.T) {
 	m := newGroupedTestModel(true)
 	// Three visible lines: filter row, blank, and one session row short of the
 	// list, so the rule has to be paid for out of the same budget.
-	m.height = headerLines + 3
+	m.height = headerLines + footerLines + 3
 
 	m.cursorDown(4)
 	assert.Equal(t, 4, m.cursor)
 	assert.Equal(t, 3, m.offset, "the rule occupies a line the viewport must scroll past")
 
-	lines := strings.Split(ansi.Strip(m.View().Content), "\n")
+	lines := listOf(m)
 	assert.Contains(t, lines[len(lines)-1], "rails-app")
 }
 

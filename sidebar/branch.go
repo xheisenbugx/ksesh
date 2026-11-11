@@ -10,6 +10,7 @@ import (
 	"github.com/xheisenbugx/ksesh/agent"
 	ansicolor "github.com/xheisenbugx/ksesh/ansi"
 	"github.com/xheisenbugx/ksesh/model"
+	"github.com/xheisenbugx/ksesh/ui"
 )
 
 // Repos tells the sidebar about the branch a thread is on. Both can be slow
@@ -183,7 +184,7 @@ func (m Model) branchLabel(a *model.Agent) string {
 		return ""
 	}
 	st := info.status
-	out := m.th.mute(ansi.Truncate(st.Branch, branchMax, "…"))
+	out := m.th.Mute(ansi.Truncate(st.Branch, branchMax, "…"))
 	counts := ""
 	if st.Ahead > 0 {
 		counts += "↑" + strconv.Itoa(st.Ahead)
@@ -192,15 +193,15 @@ func (m Model) branchLabel(a *model.Agent) string {
 		counts += "↓" + strconv.Itoa(st.Behind)
 	}
 	if counts != "" {
-		out += " " + m.th.mute(counts)
+		out += " " + m.th.Mute(counts)
 	}
 	if info.hasPR {
 		icon, color := prIcon(info.pr)
 		pr := icon + " #" + strconv.Itoa(info.pr.Number)
 		if color == 0 {
-			out += " " + m.th.mute(pr)
+			out += " " + m.th.Mute(pr)
 		} else {
-			out += " " + fg(color, pr)
+			out += " " + ui.Fg(color, pr)
 		}
 	}
 	return out

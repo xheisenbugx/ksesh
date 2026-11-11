@@ -243,7 +243,7 @@ func (i *indent) Write(p []byte) (int, error) {
 
 // tools are the programs ksesh's kitty side runs, and what for.
 var tools = []struct{ name, why string }{
-	{"fzf", "the cmd+p and cmd+a pickers"},
+	{"fzf", "contrib/ksesh-fzf and ksesh-agents-fzf, if you bind them"},
 	{"zoxide", "sessions from the directories you use"},
 	{"git", "worktrees and the sidebar's branches"},
 	{"gh", "pull requests in the sidebar and 'ksesh wt'"},

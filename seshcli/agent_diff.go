@@ -47,36 +47,17 @@ preview's, the terminal's, or --width.`,
 				width = outputWidth()
 			}
 
-			r, err := review.Collect(deps.Shell, a.Path, baseRef)
+			maxLines, _ := cmd.Flags().GetInt("max-file-lines")
+			text, err := reviewText(deps, a.Path, baseRef, review.Options{Width: width, StatOnly: statOnly, MaxFileLines: maxLines}, noDelta)
 			if err != nil {
 				return err
 			}
-			out := cmd.OutOrStdout()
-			var paged bytes.Buffer
 			pager, _ := cmd.Flags().GetBool("pager")
-			if pager {
-				out = &paged
+			if !pager {
+				_, err := fmt.Fprintln(cmd.OutOrStdout(), text)
+				return err
 			}
-			delta, _ := exec.LookPath("delta")
-			maxLines, _ := cmd.Flags().GetInt("max-file-lines")
-			opts := review.Options{Width: width, StatOnly: statOnly, MaxFileLines: maxLines}
-			if statOnly || noDelta || delta == "" || r.Patch == "" {
-				fmt.Fprintln(out, review.Render(r, opts))
-			} else {
-				opts.StatOnly = true
-				fmt.Fprintln(out, review.Render(r, opts))
-				fmt.Fprintln(out)
-				d := exec.Command(delta, "--paging=never", "--line-numbers", "--width="+strconv.Itoa(width))
-				d.Stdin = strings.NewReader(r.Patch + "\n")
-				d.Stdout, d.Stderr = out, cmd.ErrOrStderr()
-				if err := d.Run(); err != nil {
-					return err
-				}
-			}
-			if pager {
-				return page(paged.String(), cmd.OutOrStdout(), cmd.ErrOrStderr())
-			}
-			return nil
+			return page(text+"\n", cmd.OutOrStdout(), cmd.ErrOrStderr())
 		},
 	}
 	cmd.Flags().Bool("pager", false, "page it in less, as the sidebar's d does")
@@ -86,6 +67,30 @@ preview's, the terminal's, or --width.`,
 	cmd.Flags().Int("max-file-lines", 0, "fold the diff of files with more changed lines than this (0: never)")
 	cmd.Flags().IntP("width", "w", 0, "columns to draw in (default: fzf preview or terminal width)")
 	return cmd
+}
+
+// reviewText is the review of the worktree in dir against base (origin's
+// default branch when empty): drawn by ksesh, or its diff by delta when that
+// is installed and noDelta isn't set.
+func reviewText(deps *Deps, dir, base string, opts review.Options, noDelta bool) (string, error) {
+	r, err := review.Collect(deps.Shell, dir, base)
+	if err != nil {
+		return "", err
+	}
+	delta, _ := exec.LookPath("delta")
+	if opts.StatOnly || noDelta || delta == "" || r.Patch == "" {
+		return review.Render(r, opts), nil
+	}
+	stat := opts
+	stat.StatOnly = true
+	var out, errOut bytes.Buffer
+	d := exec.Command(delta, "--paging=never", "--line-numbers", "--width="+strconv.Itoa(opts.Width))
+	d.Stdin = strings.NewReader(r.Patch + "\n")
+	d.Stdout, d.Stderr = &out, &errOut
+	if err := d.Run(); err != nil {
+		return "", fmt.Errorf("delta: %w: %s", err, strings.TrimSpace(errOut.String()))
+	}
+	return review.Render(r, stat) + "\n\n" + strings.TrimRight(out.String(), "\n"), nil
 }
 
 // page shows text in less, keeping its colors, or prints it without less.

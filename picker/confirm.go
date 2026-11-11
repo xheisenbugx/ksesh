@@ -195,7 +195,7 @@ func (m Model) confirmView() string {
 	}
 
 	center := lipgloss.NewStyle().Width(inner).MaxWidth(inner).Align(lipgloss.Center)
-	faint := center.Faint(true)
+	faint := center.Foreground(m.th.Colors.Muted)
 
 	lines := []string{
 		center.Render(confirmPrompt(c.action)),
@@ -208,11 +208,11 @@ func (m Model) confirmView() string {
 	if c.action == actionRemove && c.path != "" && c.path != c.name {
 		lines = append(lines, faint.Render(truncate(c.path, inner)))
 	}
-	lines = append(lines, "", center.Render(confirmButtons(c.yes)))
+	lines = append(lines, "", center.Render(m.confirmButtons(c.yes)))
 
 	return lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.ANSIColor(4)).
+		BorderForeground(m.th.Colors.Accent).
 		Padding(1, 2).
 		Render(strings.Join(lines, "\n"))
 }
@@ -226,10 +226,11 @@ func confirmPrompt(action confirmAction) string {
 	return "Do you want to remove this directory from zoxide?"
 }
 
-// confirmButtons renders the Yes/No pair with the focused one filled in.
-func confirmButtons(yes bool) string {
-	focused := lipgloss.NewStyle().Reverse(true).Bold(true)
-	blurred := lipgloss.NewStyle().Faint(true)
+// confirmButtons renders the Yes/No pair with the focused one filled in with
+// the accent, the way an alias chip fills in as it matches.
+func (m Model) confirmButtons(yes bool) string {
+	focused := lipgloss.NewStyle().Reverse(true).Bold(true).Foreground(m.th.Colors.Accent)
+	blurred := lipgloss.NewStyle().Foreground(m.th.Colors.Muted)
 	yesStyle, noStyle := blurred, focused
 	if yes {
 		yesStyle, noStyle = focused, blurred

@@ -9,8 +9,8 @@ own `goto_session`, `tab_bar_filter session:…` and `{session_name}` work with
 them too.
 
 Requires kitty **0.43+** (sessions were introduced in 0.43; the thread
-sidebar needs **0.50+**), `zoxide`, and `fzf` for the pickers. `git` and `gh`
-light up worktrees and pull requests.
+sidebar needs **0.50+**) and `zoxide`. `git` and `gh` light up worktrees and
+pull requests; `fzf` is only needed for the fzf pickers in `contrib/`.
 
 ## How sesh concepts map onto kitty
 
@@ -61,10 +61,10 @@ The keys it maps (cmd is `super`):
 
 | key                  | does                                                       |
 | -------------------- | ---------------------------------------------------------- |
-| `cmd+p`              | session picker ([`ksesh-fzf`](contrib/ksesh-fzf))          |
+| `cmd+p`              | session picker (`ksesh picker`)                            |
 | `cmd+shift+p`        | back to the previous session                               |
 | `cmd+shift+r`        | rename the session                                         |
-| `cmd+a`              | agent picker ([`ksesh-agents-fzf`](contrib/ksesh-agents-fzf)) |
+| `cmd+a`              | agent picker (`ksesh agent pick`)                          |
 | `cmd+j`, `cmd+shift+j` | the agent that needs you next, the one before            |
 | `cmd+b`              | show or hide the thread sidebar in every tab               |
 | `cmd+shift+b`        | into the tab's sidebar and back out                        |
@@ -95,7 +95,7 @@ ksesh list                 # sessions from kitty, config, session files and zoxi
 ksesh list -t              # only running kitty sessions (-c config, -T session files, -z zoxide)
 ksesh list -i --json       # icons / JSON, as in sesh
 ksesh connect <name|dir>   # switch to it, creating it when needed
-ksesh picker -i --preview  # the sesh picker TUI
+ksesh picker -i --preview  # the session picker TUI
 ksesh last                 # the session you were in before this one
 ksesh preview <name>       # live screen of a session, or a directory listing
 ksesh root                 # root of the current session
@@ -119,12 +119,21 @@ With fzf instead of the built-in picker:
 ksesh connect "$(ksesh list -i | fzf --ansi --no-sort)"
 ```
 
-[`contrib/ksesh-fzf`](contrib/ksesh-fzf) is the kitty version of sesh's
-fzf-tmux popup binding: `^a` all, `^t` kitty sessions, `^g` configs, `^s`
-session files, `^x` zoxide, `^f` find directories (needs `fd`), `^d` kill the
-highlighted session, with `ksesh preview` on the right. In a tab split into
-several windows it zooms the tab (the `stack` layout) while it is open, so the
-picker gets the whole tab. `ksesh setup` maps it to `cmd+p`.
+The picker, `ksesh picker`, is sesh's, drawn the way the sidebar is: the
+same masthead, colors mixed from your terminal's own, a bar on the selected
+row and the keys for it at the bottom. Without `-c`, `-t`, `-z` or `-T` it
+lists everything, and switches source as you go: `^a` all, `^t` kitty
+sessions, `^g` configs, `^s` session files, `^z` zoxide. `^x` kills the
+highlighted session (or forgets a zoxide directory), `^o` shows or hides the
+preview. `--zoom` gives it the whole tab while it is open, in a tab split
+into several windows (the `stack` layout), as `ksesh setup` maps it to
+`cmd+p`.
+
+[`contrib/ksesh-fzf`](contrib/ksesh-fzf), the kitty version of sesh's
+fzf-tmux popup binding, is still installed next to `ksesh.conf` for those who
+would rather have fzf: `^a` all, `^t` kitty sessions, `^g` configs, `^s`
+session files, `^x` zoxide, `^f` find directories (needs `fd`), `^d` kill.
+Bind it in `ksesh-local.conf` to put it back on `cmd+p`.
 
 `ksesh kill [name]` closes every window of a session (the attached one without
 a name); like `connect`, it accepts a line from `ksesh list -i` as is.
@@ -194,27 +203,37 @@ yet marked `●`. The diff is drawn with line numbers and tinted backgrounds, an
 goes through [delta](https://github.com/dandavison/delta) instead when it is
 installed. `--pager` pages it in `less`.
 
-[`contrib/ksesh-agents-fzf`](contrib/ksesh-agents-fzf) is a live picker over
-them (it refreshes every 2 seconds), with the agent's screen, or its git diff,
-on the right, from which most things you'd switch to an agent for can be done
-in place. Its footer only shows the keys that do something for the selected
-agent (approve and deny for a waiting one, interrupt for a working one, …):
+`ksesh agent pick` (`cmd+a`) is the sidebar's list of threads as a full
+window picker, with the selected thread's screen, or its review, beside it.
+Typing filters (fzf style: `lgn` finds `login`); `enter` goes to the thread,
+or resumes a closed one, and quits. The rest are ctrl and alt keys, and the
+status bar only shows those that do something for the selected thread:
 
 | key      | does                                                    |
 | -------- | ------------------------------------------------------- |
-| `enter`  | go to the agent                                         |
-| `ctrl-y` | approve: enter in a waiting agent's permission prompt   |
-| `ctrl-x` | interrupt a working agent, deny a waiting one (escape)  |
-| `ctrl-o` | reply: type a message and send it                       |
-| `ctrl-s` | mark seen (back to idle)                                |
-| `ctrl-g` | preview the review (`ksesh agent diff`) instead of the screen, and back; files with hundreds of changed lines are folded |
-| `alt-d`  | the full review in `less`, nothing folded               |
-| `ctrl-d` | scroll the preview half a page down (`ctrl-u` up)       |
-| `alt-b`  | open the branch's pull request                          |
-| `alt-w`  | close the agent's window (asks first)                   |
+| `enter`  | go to the thread, or resume a closed one                |
+| `ctrl+y` | approve: enter in a waiting agent's permission prompt   |
+| `ctrl+x` | interrupt a working agent, deny a waiting one (escape)  |
+| `ctrl+o` | reply: type a message and send it                       |
+| `ctrl+s` | mark a finished agent seen (back to idle)               |
+| `ctrl+g` | preview the review (`ksesh agent diff`) instead of the screen, and back; files with hundreds of changed lines are folded |
+| `alt+d`  | the full review in `less`, nothing folded               |
+| `ctrl+d` | scroll the preview half a page down (`ctrl+u` up)       |
+| `alt+p` `alt+s` `alt+z` `alt+e` | pin, settle, snooze, wake        |
+| `alt+b`  | open the branch's pull request                          |
+| `alt+w`  | close the agent's window (asks first)                   |
+| `alt+m`  | the thread's menu, as in the sidebar                    |
+| `f1`     | every key                                               |
+
+The screen follows the agent's bottom unless you scroll up, under a header
+that stays: its status, where it runs, its branch and changes. The list is
+the sidebar's, sections and shelves included, so snoozed and settled threads
+are a search away; opening or closing a shelf in the picker leaves the
+sidebars' alone. [`contrib/ksesh-agents-fzf`](contrib/ksesh-agents-fzf), the
+fzf picker it replaces, is still installed next to `ksesh.conf`.
 
 The status also shows wherever sessions do: `ksesh list -i`, `ksesh-fzf` and
-the picker draw a session's most urgent agent status in place of its kitty
+the pickers draw a session's most urgent agent status in place of its kitty
 icon, and list sessions that need you first.
 
 In kitty itself, [`contrib/ksesh_agents.py`](contrib/ksesh_agents.py) adds:
