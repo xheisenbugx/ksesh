@@ -24,7 +24,8 @@ const (
 	actNextSection
 	actPrevSection
 	actGo
-	// actOpen opens or closes a shelf (space), and does nothing on a thread.
+	// actOpen opens or closes a shelf (space), and on a thread opens its
+	// actions, as actMenu does: space is the sidebar's leader key.
 	actOpen
 	actBack
 	actFilter
@@ -106,7 +107,7 @@ func sidebarKeys() keyMap {
 		actNextSection: ui.Bind("tab", "next section", "tab"),
 		actPrevSection: ui.Bind("shift+tab", "previous section", "shift+tab"),
 		actGo:          ui.Bind("↵", "go", "enter", "l", "right"),
-		actOpen:        ui.Bind("space", "open", "space"),
+		actOpen:        ui.Bind("space", "actions", "space"),
 		actBack:        ui.Bind("esc", "back", "esc", "h", "left"),
 		actFilter:      ui.Bind("/", "filter", "/"),
 		actNth:         ui.Bind("1-9", "go to the nth thread", "1", "2", "3", "4", "5", "6", "7", "8", "9"),
@@ -172,7 +173,7 @@ func pickerKeys() keyMap {
 		actClose:         ui.Bind("alt+w", "close", "alt+w"),
 		actArchive:       ui.Bind("alt+a", "archive", "alt+a"),
 		actHelp:          ui.Bind("f1", "keys", "f1"),
-		actMenu:          ui.Bind("alt+m", "menu", "alt+m", "menu"),
+		actMenu:          ui.Bind("alt+space", "actions", "alt+space", "alt+m", "menu"),
 		actTogglePreview: ui.Bind("^/", "preview", "ctrl+/", "ctrl+_"),
 		actPreviewDown:   ui.Bind("^d", "scroll preview", "ctrl+d", "pgdown"),
 		actPreviewUp:     ui.Bind("^u", "scroll preview up", "ctrl+u", "pgup"),
@@ -209,7 +210,7 @@ func (m Model) helpSections() []ui.HelpSection {
 			e("settle, restore", actSettle),
 			e("snooze, wake", actSnooze, actWake),
 			e("undo", actUndo),
-			e("menu, or right click", actMenu),
+			e("actions, by letter; or right click", actOpen, actMenu),
 		}},
 		{"The agent", []helpEntry{
 			e("approve", actApprove),

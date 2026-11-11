@@ -207,6 +207,10 @@ type Model struct {
 	helpOffset int
 
 	keys keyMap
+	// letters are the sidebar's keys, in the picker too: what the actions
+	// menu shows and takes, so a thread's actions have the same letter
+	// whichever of the two you open it in.
+	letters keyMap
 	// query is the picker's filter, typed into at any time.
 	query textinput.Model
 	// The picker's preview pane: whether it is on, showing the diff rather
@@ -234,7 +238,7 @@ func New(opts Options) Model {
 	in := textinput.New()
 	in.Prompt = "› "
 	m := Model{opts: opts, input: in, now: opts.Now(), shown: true, th: ui.ThemeFor(nil, nil), hoverButton: -1,
-		branches: map[string]*branchInfo{}, autoSettled: map[int]time.Time{}, keys: sidebarKeys()}
+		branches: map[string]*branchInfo{}, autoSettled: map[int]time.Time{}, keys: sidebarKeys(), letters: sidebarKeys()}
 	if opts.Picker {
 		m.keys = pickerKeys()
 		m.query = textinput.New()
@@ -806,6 +810,7 @@ func (m Model) run(do act) (tea.Model, tea.Cmd) {
 		if r, _, ok := m.selected(); ok && r.kind != rowThread {
 			return m.activate()
 		}
+		return m.run(actMenu)
 	case actBack:
 		if m.filter != "" {
 			m.filter = ""
@@ -934,6 +939,11 @@ func (m Model) run(do act) (tea.Model, tea.Cmd) {
 		if r, _, ok := m.selected(); ok && r.kind == rowThread {
 			return m.openThreadMenu(r.agent, 4, m.rowY(rowKey(r))), nil
 		}
+		y := 0
+		if r, _, ok := m.selected(); ok {
+			y = m.rowY(rowKey(r))
+		}
+		return m.openMenu("", m.viewMenu(), 4, y), nil
 	}
 	return m, nil
 }
