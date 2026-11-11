@@ -129,7 +129,7 @@ func (c *RealConfigurator) applyDefaults(config *model.Config) {
 		config.GitDirLength = 1
 	}
 	if config.TUI.Prompt == "" {
-		config.TUI.Prompt = "> "
+		config.TUI.Prompt = "› "
 	}
 	if config.TUI.Placeholder == "" {
 		config.TUI.Placeholder = "Filter Sessions..."

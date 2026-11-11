@@ -1,15 +1,15 @@
 package sidebar
 
 import (
+	"charm.land/bubbles/v2/key"
 	"strconv"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
-	"github.com/charmbracelet/x/ansi"
 
 	"github.com/xheisenbugx/ksesh/agent"
-	ansicolor "github.com/xheisenbugx/ksesh/ansi"
 	"github.com/xheisenbugx/ksesh/model"
+	"github.com/xheisenbugx/ksesh/ui"
 )
 
 // Icons of the actions on a thread, in its menu and on its buttons.
@@ -36,8 +36,10 @@ const (
 // buttons.
 type action struct {
 	icon, label string
-	// key is the key that does it, shown at the right of a menu; hint, if
-	// set, is shown there instead.
+	// do is the act it runs, whose keys a menu shows at its right. key is
+	// a key of the menu's own instead (a snooze time's number); hint, if set,
+	// is shown in place of either.
+	do        act
 	key, hint string
 	on        bool // a button showing a state: a pinned thread's pin
 	danger    bool
@@ -45,9 +47,9 @@ type action struct {
 	run       func(Model) (tea.Model, tea.Cmd)
 }
 
-// byKey is an action done as its key is.
-func byKey(icon, label, key string) action {
-	return action{icon: icon, label: label, key: key, run: func(m Model) (tea.Model, tea.Cmd) { return m.run(key) }}
+// byAct is an action that runs an act, as its keys do.
+func byAct(icon, label string, do act) action {
+	return action{icon: icon, label: label, do: do, run: func(m Model) (tea.Model, tea.Cmd) { return m.run(do) }}
 }
 
 var separator = action{sep: true}
@@ -99,9 +101,8 @@ func (p popup) itemAt(x, y int) (int, bool) {
 //	╰──────────────────────╯
 func (m Model) threadMenu(a *model.Agent) []action {
 	if a.Closed {
-		resume := byKey(iconResume, "Resume", "enter")
-		resume.hint = "↵"
-		forget := byKey(iconForget, "Forget…", "X")
+		resume := byAct(iconResume, "Resume", actGo)
+		forget := byAct(iconForget, "Forget…", actClose)
 		forget.danger = true
 		items := []action{resume}
 		if pr, ok := m.pullRequest(a); ok {
@@ -111,56 +112,55 @@ func (m Model) threadMenu(a *model.Agent) []action {
 	}
 	section := agent.SectionOf(a, m.now, m.opts.ThreadOpts)
 	status := agent.Status(a.Status)
-	items := []action{byKey(iconGo, "Go to thread", "enter")}
-	items[0].hint = "↵"
+	items := []action{byAct(iconGo, "Go to thread", actGo)}
 
 	if section != agent.Snoozed && section != agent.Settled {
-		pin := byKey(iconPin, "Pin", "p")
+		pin := byAct(iconPin, "Pin", actPin)
 		if a.Thread.Pin != 0 {
 			pin.label = "Unpin"
 		}
 		items = append(items, pin)
 		if a.Thread.Pin != 0 && len(m.board()[agent.Pinned]) > 1 {
-			items = append(items, byKey(iconUp, "Move up", "K"), byKey(iconDown, "Move down", "J"))
+			items = append(items, byAct(iconUp, "Move up", actPinUp), byAct(iconDown, "Move down", actPinDown))
 		}
 	}
 	switch {
 	case section == agent.Snoozed:
-		items = append(items, byKey(iconWake, "Wake now", "w"))
+		items = append(items, byAct(iconWake, "Wake now", actWake))
 	case agent.BadgeOf(a, m.now) == agent.BadgeWoke:
-		items = append(items, byKey(iconWake, "Dismiss", "w"))
+		items = append(items, byAct(iconWake, "Dismiss", actWake))
 	case section != agent.Settled:
 		items = append(items, m.snoozeAction())
 	}
 	switch {
 	case section == agent.Settled:
-		items = append(items, byKey(iconRestore, "Restore", "s"))
+		items = append(items, byAct(iconRestore, "Restore", actSettle))
 	case status != agent.Working && status != agent.Waiting:
-		items = append(items, byKey(iconSettle, "Settle", "s"))
+		items = append(items, byAct(iconSettle, "Settle", actSettle))
 	}
 
 	items = append(items, separator)
 	switch status {
 	case agent.Waiting:
-		items = append(items, byKey(iconApprove, "Approve", "a"), byKey(iconDeny, "Deny", "x"))
+		items = append(items, byAct(iconApprove, "Approve", actApprove), byAct(iconDeny, "Deny", actDeny))
 	case agent.Working:
-		items = append(items, byKey(iconInterrupt, "Interrupt", "x"))
+		items = append(items, byAct(iconInterrupt, "Interrupt", actDeny))
 	}
-	items = append(items, byKey(iconReply, "Reply…", "r"), byKey(iconReview, "Review changes", "d"))
+	items = append(items, byAct(iconReply, "Reply…", actReply), byAct(iconReview, "Review changes", actReview))
 	if pr, ok := m.pullRequest(a); ok {
 		items = append(items, m.prAction(pr))
 	}
-	items = append(items, byKey(iconRename, "Rename…", "R"), separator)
-	items = append(items, byKey(iconNew, "New thread…", "n"))
+	items = append(items, byAct(iconRename, "Rename…", actRename), separator)
+	items = append(items, byAct(iconNew, "New thread…", actNew))
 	if m.opts.Run != nil && a.Path != "" {
-		items = append(items, byKey(iconBranch, "New in a worktree…", "N"))
+		items = append(items, byAct(iconBranch, "New in a worktree…", actNewWorktree))
 	}
 	items = append(items, separator)
-	closeIt := byKey(iconClose, "Close window…", "X")
+	closeIt := byAct(iconClose, "Close window…", actClose)
 	closeIt.danger = true
 	items = append(items, closeIt)
 	if _, ok := m.archivable(a); ok {
-		archive := byKey(iconSettle, "Archive worktree…", "A")
+		archive := byAct(iconSettle, "Archive worktree…", actArchive)
 		archive.danger = true
 		items = append(items, archive)
 	}
@@ -170,12 +170,12 @@ func (m Model) threadMenu(a *model.Agent) []action {
 // prAction opens a thread's pull request in the browser.
 func (m Model) prAction(pr model.PullRequestState) action {
 	icon, _ := prIcon(pr)
-	return byKey(icon, "Open PR #"+strconv.Itoa(pr.Number), "P")
+	return byAct(icon, "Open PR #"+strconv.Itoa(pr.Number), actPR)
 }
 
 // snoozeAction opens the snooze times in place of the menu it is in.
 func (m Model) snoozeAction() action {
-	return action{icon: iconClock, label: "Snooze", key: "z", hint: "›", run: func(m Model) (tea.Model, tea.Cmd) {
+	return action{icon: iconClock, label: "Snooze", do: actSnooze, hint: "›", run: func(m Model) (tea.Model, tea.Cmd) {
 		return m.openSnoozeMenu(m.menu.x, m.menu.y-1), nil
 	}}
 }
@@ -216,13 +216,7 @@ func (m Model) openSnoozeMenu(x, y int) Model {
 // and moved left as far as it must be to fit.
 func (m Model) openMenu(title string, items []action, x, y int) Model {
 	p := popup{title: title, items: items}
-	inner := ansi.StringWidth(title) + 4
-	for _, it := range items {
-		if !it.sep {
-			inner = max(inner, 1+ansi.StringWidth(it.icon)+2+ansi.StringWidth(it.label)+3+ansi.StringWidth(it.right())+1)
-		}
-	}
-	p.w = min(inner+2, max(m.width, 1))
+	p.w = min(ui.CardWidth(title, m.menuItems(items)), max(m.width, 1))
 	p.x = max(min(x, m.width-p.w), 0)
 	p.y = y + 1
 	if p.y+p.height() > m.height {
@@ -233,11 +227,25 @@ func (m Model) openMenu(title string, items []action, x, y int) Model {
 	return m
 }
 
-func (a action) right() string {
-	if a.hint != "" {
+// right is what a menu shows at the right of an action: its hint, or the
+// keys that do it.
+func (m Model) right(a action) string {
+	switch {
+	case a.hint != "":
 		return a.hint
+	case a.key != "":
+		return a.key
 	}
-	return a.key
+	return m.keys.label(a.do)
+}
+
+// menuItems are actions as a card draws them.
+func (m Model) menuItems(items []action) []ui.MenuItem {
+	out := make([]ui.MenuItem, len(items))
+	for i, it := range items {
+		out[i] = ui.MenuItem{Icon: it.icon, Label: it.label, Right: m.right(it), Danger: it.danger, Sep: it.sep}
+	}
+	return out
 }
 
 func (m Model) pick(i int) (tea.Model, tea.Cmd) {
@@ -257,18 +265,25 @@ func (m Model) keyMenu(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			}
 		}
 	}
-	switch key := msg.String(); key {
-	case "j", "down", "ctrl+n", "tab":
+	switch k := msg.String(); {
+	case k == "j" && !m.opts.Picker, k == "down", k == "ctrl+n", k == "tab":
 		step(1)
-	case "k", "up", "ctrl+p", "shift+tab":
+	case k == "k" && !m.opts.Picker, k == "up", k == "ctrl+p", k == "shift+tab":
 		step(-1)
-	case "enter", "space", "l", "right":
+	case k == "enter", k == "space", k == "right", k == "l" && !m.opts.Picker:
 		return m.pick(m.menu.idx)
-	case "esc", "q", "h", "left", "m":
+	case k == "esc", k == "left", key.Matches(msg, m.keys[actMenu]),
+		!m.opts.Picker && (k == "q" || k == "h"):
 		m.mode, m.menu = modeNormal, popup{}
 	default:
 		for i, it := range m.menu.items {
-			if !it.sep && it.key == key {
+			if it.sep {
+				continue
+			}
+			if it.key != "" && it.key == k {
+				return m.pick(i)
+			}
+			if b, ok := m.keys[it.do]; ok && it.key == "" && it.do != actNone && key.Matches(msg, b) {
 				return m.pick(i)
 			}
 		}
@@ -276,57 +291,10 @@ func (m Model) keyMenu(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// renderMenu draws the popup's lines, each m.menu.w wide.
-func (m Model) renderMenu() []string {
-	p := m.menu
-	inner := p.w - 2
-	border := func(s string) string { return m.th.surface + m.th.accent + s + "\033[39m" }
-	top := "─" + strings.Repeat("─", inner-1)
-	if p.title != "" {
-		t := ansi.Truncate(" "+p.title+" ", inner-1, "…")
-		top = "─" + m.th.heading + bold(t) + m.th.accent + strings.Repeat("─", max(inner-1-ansi.StringWidth(t), 0))
-	}
-	lines := []string{border("╭" + top + "╮")}
-	for i, it := range p.items {
-		if it.sep {
-			lines = append(lines, border("├"+m.th.subtle+strings.Repeat("─", inner)+m.th.accent+"┤"))
-			continue
-		}
-		bg, label, icon := m.th.surface, it.label, m.th.mute(it.icon)
-		if it.danger {
-			label = fg(ansicolor.Red, label)
-		}
-		if i == p.idx {
-			bg, label, icon = m.th.selected, bold(label), m.th.accented(it.icon)
-		}
-		left := " " + icon + "  " + label
-		right := m.th.mute(it.right()) + " "
-		gap := max(inner-ansi.StringWidth(left)-ansi.StringWidth(right), 1)
-		content := ansi.Truncate(left+strings.Repeat(" ", gap)+right, inner, "…")
-		lines = append(lines, border("│")+bg+content+border("│"))
-	}
-	lines = append(lines, border("╰"+strings.Repeat("─", inner)+"╯"))
-	for i := range lines {
-		lines[i] = "\033[0m" + lines[i] + "\033[0m"
-	}
-	return lines
-}
-
 // overlay draws the popup over the screen's lines.
 func (m Model) overlay(lines []string) []string {
 	p := m.menu
-	for i, l := range m.renderMenu() {
-		y := p.y + i
-		if y < 0 || y >= len(lines) {
-			continue
-		}
-		base := lines[y]
-		if w := ansi.StringWidth(base); w < p.x+p.w {
-			base += strings.Repeat(" ", p.x+p.w-w)
-		}
-		lines[y] = ansi.Truncate(base, p.x, "") + l + ansi.TruncateLeft(base, p.x+p.w, "")
-	}
-	return lines
+	return ui.Overlay(lines, m.th.Card(p.title, m.menuItems(p.items), p.idx, p.w), p.x, p.y)
 }
 
 // buttons are the actions shown on a thread under the mouse, in place of
@@ -338,16 +306,16 @@ func (m Model) buttons(r row) []action {
 	}
 	a := r.agent
 	if a.Closed {
-		return []action{byKey(iconResume, "resume", "enter")}
+		return []action{byAct(iconResume, "resume", actGo)}
 	}
-	settle := byKey(iconSettle, "settle", "s")
+	settle := byAct(iconSettle, "settle", actSettle)
 	switch r.section {
 	case agent.Snoozed:
-		return []action{byKey(iconWake, "wake", "w"), settle}
+		return []action{byAct(iconWake, "wake", actWake), settle}
 	case agent.Settled:
-		return []action{byKey(iconRestore, "restore", "s")}
+		return []action{byAct(iconRestore, "restore", actSettle)}
 	}
-	pin := byKey(iconPin, "pin", "p")
+	pin := byAct(iconPin, "pin", actPin)
 	if a.Thread.Pin != 0 {
 		pin.label, pin.on = "unpin", true
 	}
@@ -370,7 +338,7 @@ const buttonWidth = 3
 // sit at the right of the thread's first line.
 func (m Model) buttonAt(r row, x int) int {
 	n := len(m.buttons(r))
-	start := m.width - 1 - n*buttonWidth
+	start := m.cols() - 1 - n*buttonWidth
 	if n == 0 || x < start || x >= start+n*buttonWidth {
 		return -1
 	}
@@ -388,11 +356,11 @@ func (m Model) renderButtons(r row, bg string) string {
 	for i, btn := range m.buttons(r) {
 		switch {
 		case i == m.hoverButton:
-			b.WriteString(m.th.button + m.th.accented(" "+btn.icon+" ") + back)
+			b.WriteString(m.th.Button + m.th.Accented(" "+btn.icon+" ") + back)
 		case btn.on:
-			b.WriteString(" " + m.th.accented(btn.icon) + " ")
+			b.WriteString(" " + m.th.Accented(btn.icon) + " ")
 		default:
-			b.WriteString(" " + m.th.mute(btn.icon) + " ")
+			b.WriteString(" " + m.th.Mute(btn.icon) + " ")
 		}
 	}
 	return b.String() + " "

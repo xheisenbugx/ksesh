@@ -4,17 +4,21 @@ import (
 	"fmt"
 	"image/color"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
+	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/sahilm/fuzzy"
 
 	"github.com/xheisenbugx/ksesh/agent"
+	ansicolor "github.com/xheisenbugx/ksesh/ansi"
 	"github.com/xheisenbugx/ksesh/icon"
 	"github.com/xheisenbugx/ksesh/model"
+	"github.com/xheisenbugx/ksesh/ui"
 )
 
 type sessionItem struct {
@@ -62,9 +66,24 @@ type IconFunc func(session model.SeshSession) string
 type PreviewFunc func(name string) (string, error)
 
 // sessionsLoadedMsg carries the result of the async fetch back to Update().
+// seq is the fetch it answers: switching sources starts a new one, and the
+// answer to an older one is dropped.
 type sessionsLoadedMsg struct {
 	sessions model.SeshSessions
 	err      error
+	seq      int
+}
+
+// Source is one of the lists the picker can switch between with a key, like
+// contrib/ksesh-fzf's ^a ^t ^g ^s: every session, only kitty's, the
+// configured ones...
+type Source struct {
+	// Key switches to it, as bubbletea names keys: "ctrl+t".
+	Key string
+	// Label names it in the tabs under the masthead; Icon goes before the
+	// label when icons are on.
+	Label, Icon string
+	Fetch       FetchFunc
 }
 
 // previewFetchMsg fires after the debounce window and starts the fetch for the
@@ -155,6 +174,10 @@ type Options struct {
 	// kitty session. Nil leaves ctrl+x inert on the rows it would have owned.
 	Remove RemoveFunc
 	Kill   KillFunc
+	// Sources are the lists the picker switches between, the first one
+	// current: the fetchFunc given to New should list the same. Empty shows
+	// no tabs.
+	Sources []Source
 }
 
 type Model struct {
@@ -225,6 +248,19 @@ type Model struct {
 	// previewSeq increments on every request so a result that arrives after the
 	// cursor moved on can be told apart from the current one.
 	previewSeq int
+
+	// th is the palette, from the terminal's colors once it says them.
+	th      ui.Theme
+	bg, fgc color.Color
+	keys    keyMap
+
+	// sources are the lists the tabs switch between, source the current
+	// one, and sourceKeys the binding of each. fetchSeq counts the fetches,
+	// so a switch drops what an earlier one returns late.
+	sources    []Source
+	sourceKeys []key.Binding
+	source     int
+	fetchSeq   int
 }
 
 // srcIcon returns the nerd font icon and color for a session source. The icon
@@ -296,9 +332,10 @@ func (m Model) aliasChip(name string, matchLen int) string {
 	matchLen = max(min(matchLen, len(runes)), 0)
 
 	label := lipgloss.NewStyle().Reverse(true)
+	matchColor := m.th.Colors.Accent
 	var text string
 	if matchLen > 0 {
-		text = label.Foreground(aliasMatchColor).Render(string(runes[:matchLen]))
+		text = label.Foreground(matchColor).Render(string(runes[:matchLen]))
 	}
 	if matchLen < len(runes) {
 		text += label.Render(string(runes[matchLen:]))
@@ -316,25 +353,24 @@ func (m Model) aliasChip(name string, matchLen int) string {
 	// The caps belong to the match block whenever the letters beside them do:
 	// the left one as soon as anything matches, the right one only once the
 	// whole alias has, so a full match reads as one unbroken chip.
-	return chipCap(capStyle, leftCap, matchLen > 0) +
+	return chipCap(capStyle, leftCap, matchLen > 0, matchColor) +
 		text +
-		chipCap(capStyle, rightCap, matchLen > 0 && matchLen == len(runes)) + " "
+		chipCap(capStyle, rightCap, matchLen > 0 && matchLen == len(runes), matchColor) + " "
 }
 
 // chipCap renders one end of the chip, painted into the match block when
 // matched so the highlight carries into the rounded end instead of stopping
 // short at the first or last letter.
-func chipCap(capStyle lipgloss.Style, glyph string, matched bool) string {
+//
+// Matched alias runes are painted in the theme's accent, the color matches in
+// session names are drawn in; under the chip's reverse video it fills as a
+// block of background rather than colored text.
+func chipCap(capStyle lipgloss.Style, glyph string, matched bool, matchColor color.Color) string {
 	if matched {
-		return capStyle.Foreground(aliasMatchColor).Render(glyph)
+		return capStyle.Foreground(matchColor).Render(glyph)
 	}
 	return capStyle.Render(glyph)
 }
-
-// aliasMatchColor is the color matched alias runes are painted in. It is the
-// same green the matches in session names are drawn in, and under the chip's
-// reverse video it fills as a block of background rather than colored text.
-var aliasMatchColor = lipgloss.ANSIColor(2)
 
 // indexFilterPrefix is the sigil that, typed first, enters index mode: the rows
 // are numbered and the next digit jumps straight to one of them.
@@ -413,20 +449,38 @@ func New(fetchFunc FetchFunc, opts Options) Model {
 		previewMinWidth:         previewMinWidth(opts.PreviewMinWidth),
 		previewBorderName:       previewBorder(opts.PreviewBorder),
 		groupSeparator:          opts.GroupSeparator,
+		th:                      ui.ThemeFor(nil, nil),
+		keys:                    newKeyMap("connect"),
+		sources:                 opts.Sources,
+	}
+	for _, src := range opts.Sources {
+		m.sourceKeys = append(m.sourceKeys, ui.Bind(shortKey(src.Key), src.Label, src.Key))
 	}
 	m.focusCmd = m.filterInput.Focus()
 	return m
 }
 
 func (m Model) Init() tea.Cmd {
-	return tea.Batch(m.focusCmd, m.fetchSessions())
+	return tea.Batch(m.focusCmd, m.fetchSessions(), tea.RequestBackgroundColor, tea.RequestForegroundColor)
 }
 
 func (m Model) fetchSessions() tea.Cmd {
+	fetch, seq := m.fetchFunc, m.fetchSeq
 	return func() tea.Msg {
-		sessions, err := m.fetchFunc()
-		return sessionsLoadedMsg{sessions: sessions, err: err}
+		sessions, err := fetch()
+		return sessionsLoadedMsg{sessions: sessions, err: err, seq: seq}
 	}
+}
+
+// switchSource lists source i in place of the current one, keeping what is
+// typed. Pressed again, the current source's key lists it afresh.
+func (m Model) switchSource(i int) (tea.Model, tea.Cmd) {
+	m.source = i
+	m.fetchFunc = m.sources[i].Fetch
+	m.fetchSeq++
+	m.loading = true
+	m.cursor, m.offset = 0, 0
+	return m, m.fetchSessions()
 }
 
 // previewDebounce is how long a cursor position has to hold before its preview
@@ -514,7 +568,28 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.previewErr = msg.err
 		return m, nil
 
+	case tea.BackgroundColorMsg:
+		m.bg = msg.Color
+		m.th = ui.ThemeFor(m.bg, m.fgc)
+		return m, nil
+
+	case tea.ForegroundColorMsg:
+		m.fgc = msg.Color
+		m.th = ui.ThemeFor(m.bg, m.fgc)
+		return m, nil
+
 	case sessionsLoadedMsg:
+		if msg.seq != m.fetchSeq {
+			return m, nil
+		}
+		if msg.err != nil && msg.seq > 0 {
+			// A source switched to can't be listed: the list before it is
+			// still good, so say so rather than end the picker.
+			m.loading = false
+			m.status = fmt.Sprintf("Couldn't list %s: %v", m.sources[m.source].Label, msg.err)
+			m.applyFilter()
+			return m, nil
+		}
 		if msg.err != nil {
 			m.loadErr = msg.err
 			return m, tea.Quit
@@ -550,8 +625,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// retires it.
 		m.status = ""
 
-		switch msg.String() {
-		case "enter":
+		for i, b := range m.sourceKeys {
+			if key.Matches(msg, b) {
+				return m.switchSource(i)
+			}
+		}
+
+		switch {
+		case key.Matches(msg, m.keys.Choose):
 			if m.loading {
 				return m, nil
 			}
@@ -561,30 +642,30 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, tea.Quit
 
-		case "esc", "ctrl+c":
+		case key.Matches(msg, m.keys.Quit):
 			m.quit = true
 			return m, tea.Quit
 
-		case "up", "ctrl+k", "ctrl+p":
+		case key.Matches(msg, m.keys.Up):
 			m.cursorUp(1)
 			return m, m.schedulePreview()
 
-		case "down", "ctrl+j", "ctrl+n":
+		case key.Matches(msg, m.keys.Down):
 			m.cursorDown(1)
 			return m, m.schedulePreview()
 
-		case "ctrl+u":
+		case key.Matches(msg, m.keys.HalfUp):
 			m.cursorUp(m.visibleCount() / 2)
 			return m, m.schedulePreview()
 
-		case "ctrl+d":
+		case key.Matches(msg, m.keys.HalfDown):
 			m.cursorDown(m.visibleCount() / 2)
 			return m, m.schedulePreview()
 
-		case "ctrl+x":
+		case key.Matches(msg, m.keys.Remove):
 			return m.startRemove()
 
-		case "ctrl+o":
+		case key.Matches(msg, m.keys.Preview):
 			// Toggling stays allowed on a narrow terminal: the pane is gated on
 			// width at render time, so it appears once the window has room.
 			if m.previewFunc == nil {
@@ -998,10 +1079,10 @@ func (m *Model) scrollToCursor() {
 const fallbackVisibleCount = 5
 
 // visibleCount is how many session rows fit. The picker runs on the alt screen,
-// so it gets every row the terminal has apart from the filter row and the blank
-// line under it.
+// so it gets every row the terminal has apart from the header (masthead, tabs,
+// filter and the blank line under it) and the status bar.
 func (m Model) visibleCount() int {
-	available := m.height - headerLines
+	available := m.height - headerLines - footerLines
 	if available < 1 {
 		return fallbackVisibleCount
 	}
@@ -1083,108 +1164,38 @@ func (m Model) contentWidth() int {
 	return w
 }
 
+// View draws the picker the way the sidebar is drawn:
+//
+//	 Sessions ╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱
+//	 all · kitty · configs · files · zoxide    12
+//	  › dot
+//
+//	▌  dotfiles                     │ preview…
+//	   notes                        │
+//	 ─────────────────────────────────────────
+//	 ↵ connect · ^x kill · ^o preview · esc quit
 func (m Model) View() tea.View {
-	var b strings.Builder
-
-	// Filter input
-	b.WriteString(filterIndent + m.filterInput.View())
-	b.WriteString("\n")
-	// The status shares the blank line under the filter, so showing one never
-	// moves the list.
-	if m.status != "" {
-		b.WriteString(lipgloss.NewStyle().Foreground(lipgloss.ANSIColor(3)).Render("  " + m.status))
+	width := m.frameWidth()
+	lines := []string{
+		m.th.Masthead("Sessions", width, ""),
+		m.tabsLine(width),
+		filterIndent + m.filterInput.View(),
+		"",
 	}
-	b.WriteString("\n")
 
 	visible := m.visibleCount()
-
-	if m.loading {
-		loadingStyle := lipgloss.NewStyle().Faint(true)
-		b.WriteString(loadingStyle.Render("  Loading sessions..."))
-		b.WriteString("\n")
-		// Pad remaining visible lines to prevent layout jump
-		for i := 1; i < visible; i++ {
-			b.WriteString("\n")
-		}
-	} else if _, aliasMode := m.aliasFilterQuery(m.filterInput.Value()); aliasMode && len(m.aliases) == 0 {
-		// Without this the sigil looks broken rather than simply unconfigured.
-		emptyStyle := lipgloss.NewStyle().Faint(true)
-		b.WriteString(emptyStyle.Render("  No aliases configured"))
-		b.WriteString("\n")
-		for i := 1; i < visible; i++ {
-			b.WriteString("\n")
-		}
-	} else {
-		// Session list
-		end := m.offset + visible
-		if end > len(m.rows) {
-			end = len(m.rows)
-		}
-
-		cursorStyle := lipgloss.NewStyle().Foreground(lipgloss.ANSIColor(2)).Bold(true)
-		matchStyle := lipgloss.NewStyle().Foreground(lipgloss.ANSIColor(2)).Bold(true)
-		normalStyle := lipgloss.NewStyle()
-		windowStyle := lipgloss.NewStyle().Foreground(lipgloss.ANSIColor(8)).Faint(true)
-		indexStyle := lipgloss.NewStyle().Foreground(lipgloss.ANSIColor(4))
-
-		// Index mode numbers the rows so the jump target can be read off the
-		// list instead of counted.
-		_, indexMode := m.indexFilterQuery(m.filterInput.Value())
-
-		for r := m.offset; r < end; r++ {
-			if m.rows[r].separator {
-				b.WriteString(m.separatorRule())
-				b.WriteString("\n")
-				continue
-			}
-			i := m.rows[r].index
-			item := m.filtered[i]
-			prefix := "  "
-			if i == m.cursor {
-				prefix = cursorStyle.Render("> ")
-			}
-			if indexMode {
-				prefix += indexGutter(i, indexStyle)
-			}
-
-			var tag string
-			if m.showIcons {
-				tag = m.iconCell(item.item)
-			}
-			chip := m.aliasChip(item.item.name, item.chipMatchLen)
-			name := highlightMatches(item.item.name, item.matchedIndexes, matchStyle, normalStyle)
-
-			var windows string
-			if m.showWindows {
-				// Window names are display-only: they are never highlighted as
-				// matches and never become part of the selected value.
-				used := lipgloss.Width(prefix) + lipgloss.Width(tag) + lipgloss.Width(chip) + lipgloss.Width(item.item.name)
-				if text := windowsText(item.item.session.WindowNames, m.contentWidth()-used); text != "" {
-					windows = windowStyle.Render(text)
-				}
-			}
-
-			b.WriteString(fmt.Sprintf("%s%s%s%s%s\n", prefix, tag, chip, name, windows))
-		}
-
-		// Pad remaining visible lines
-		for i := end - m.offset; i < visible; i++ {
-			b.WriteString("\n")
-		}
-	}
-
-	// The last row leaves a trailing newline behind. Dropping it keeps the frame
-	// exactly the height of the terminal, and makes both halves of a split the
-	// same height so the divider spans the whole block.
-	content := strings.TrimSuffix(b.String(), "\n")
-
+	list := m.listLines(visible)
 	if cols := m.previewCols(); cols > 0 {
-		list := lipgloss.NewStyle().
-			Width(m.contentWidth()).
-			MaxWidth(m.contentWidth()).
-			Render(content)
-		content = lipgloss.JoinHorizontal(lipgloss.Top, list, m.previewView(cols, visible))
+		pane := strings.Split(m.previewView(cols, visible), "\n")
+		for i := range list {
+			if i < len(pane) {
+				list[i] += pane[i]
+			}
+		}
 	}
+	lines = append(lines, list...)
+	lines = append(lines, m.th.Rule(width), m.footerLine(width))
+	content := strings.Join(lines, "\n")
 
 	if m.confirm != nil {
 		content = overlayCentered(content, m.confirmView(), m.width, m.height)
@@ -1196,41 +1207,197 @@ func (m Model) View() tea.View {
 	v.AltScreen = true
 	if c := m.filterInput.Cursor(); c != nil && m.confirm == nil {
 		c.X += len(filterIndent)
+		c.Y += filterRow
 		v.Cursor = c
 	}
 	return v
 }
 
+// frameWidth is the width the masthead and the status bar span: the
+// terminal's, or the list's before the terminal says.
+func (m Model) frameWidth() int {
+	if m.width > 0 {
+		return m.width
+	}
+	return m.contentWidth()
+}
+
+// tabsLine is the line under the masthead: the sources to switch between,
+// the current one picked out, and at the right how many rows are shown.
+func (m Model) tabsLine(width int) string {
+	left := ""
+	if len(m.sources) > 0 {
+		labels := make([]string, len(m.sources))
+		for i, src := range m.sources {
+			labels[i] = src.Label
+			if m.showIcons && src.Icon != "" {
+				labels[i] = src.Icon + " " + src.Label
+			}
+		}
+		left = " " + m.th.Tabs(labels, m.source)
+	}
+	right := ""
+	if !m.loading {
+		count := strconv.Itoa(len(m.filtered))
+		if len(m.filtered) != len(m.allItems) {
+			count += "/" + strconv.Itoa(len(m.allItems))
+		}
+		right = m.th.Mute(count)
+	}
+	return ui.Spread(left, right, width)
+}
+
+// footerLine is the status bar: what the last key ran into, or the keys
+// that do something for the selected row.
+func (m Model) footerLine(width int) string {
+	if m.status != "" {
+		return ui.Paint(" "+ui.Fg(ansicolor.Yellow, m.status), "", width)
+	}
+	return m.th.Hints(m.hints(), width)
+}
+
+// hints are the keys worth showing, the ones that do nothing for the
+// selected row left out.
+func (m Model) hints() []key.Binding {
+	hints := []key.Binding{m.keys.Choose}
+	if !m.loading && m.cursor < len(m.filtered) {
+		if action, ok := m.actionFor(m.filtered[m.cursor].item.src); ok {
+			does := "remove"
+			if action == actionKill {
+				does = "kill"
+			}
+			hints = append(hints, ui.Says(m.keys.Remove, does))
+		}
+	}
+	if m.previewFunc != nil {
+		does := "preview"
+		if m.previewOn {
+			does = "hide preview"
+		}
+		hints = append(hints, ui.Says(m.keys.Preview, does))
+	}
+	if len(m.sourceKeys) > 0 {
+		// One hint for them all. A binding without keys counts as
+		// disabled, so this one takes theirs.
+		var labels, keys []string
+		for _, b := range m.sourceKeys {
+			labels = append(labels, b.Help().Key)
+			keys = append(keys, b.Keys()...)
+		}
+		hints = append(hints, ui.Bind(strings.Join(labels, " "), "source", keys...))
+	}
+	return append(hints, m.keys.Quit)
+}
+
+// listLines are the visible lines of the list, each the list's width.
+func (m Model) listLines(visible int) []string {
+	width := m.contentWidth()
+	lines := make([]string, 0, visible)
+	empty := func(text string) []string {
+		lines = append(lines, ui.Paint("", "", width), ui.Center(m.th.Mute(text), width))
+		for len(lines) < visible {
+			lines = append(lines, ui.Paint("", "", width))
+		}
+		return lines[:visible]
+	}
+
+	_, aliasMode := m.aliasFilterQuery(m.filterInput.Value())
+	switch {
+	case m.loading:
+		return empty("Loading sessions...")
+	case aliasMode && len(m.aliases) == 0:
+		// Without this the sigil looks broken rather than simply unconfigured.
+		return empty("No aliases configured")
+	case len(m.allItems) == 0:
+		return empty("No sessions")
+	case len(m.filtered) == 0:
+		return empty("Nothing matches")
+	}
+
+	matchStyle := lipgloss.NewStyle().Foreground(m.th.Colors.Accent).Bold(true)
+	normalStyle := lipgloss.NewStyle()
+
+	// Index mode numbers the rows so the jump target can be read off the
+	// list instead of counted.
+	_, indexMode := m.indexFilterQuery(m.filterInput.Value())
+
+	end := min(m.offset+visible, len(m.rows))
+	for r := m.offset; r < end; r++ {
+		if m.rows[r].separator {
+			lines = append(lines, m.separatorRule())
+			continue
+		}
+		i := m.rows[r].index
+		item := m.filtered[i]
+		var prefix string
+		if indexMode {
+			prefix = indexGutter(i, m.th.Accented)
+		}
+
+		var tag string
+		if m.showIcons {
+			tag = m.iconCell(item.item)
+		}
+		chip := m.aliasChip(item.item.name, item.chipMatchLen)
+		name := highlightMatches(item.item.name, item.matchedIndexes, matchStyle, normalStyle)
+
+		var windows string
+		if m.showWindows {
+			// Window names are display-only: they are never highlighted as
+			// matches and never become part of the selected value.
+			used := rowIndent + lipgloss.Width(prefix) + lipgloss.Width(tag) + lipgloss.Width(chip) + lipgloss.Width(item.item.name)
+			if text := windowsText(item.item.session.WindowNames, width-used); text != "" {
+				windows = m.th.Mute(text)
+			}
+		}
+
+		lines = append(lines, m.th.Row(prefix+tag+chip+name+windows, i == m.cursor, width))
+	}
+	for len(lines) < visible {
+		lines = append(lines, ui.Paint("", "", width))
+	}
+	return lines
+}
+
+// filterIndent is what goes before the filter input, so its prompt lines up
+// with the names under it.
 const filterIndent = "  "
 
-// separatorRule draws the boundary between two sort_order groups: a faint rule
+// rowIndent is the cells before a row's content: the selection bar and a
+// space (ui.Theme.Row).
+const rowIndent = 2
+
+// separatorRule draws the boundary between two sort_order groups: a dim rule
 // across the list column, so a glance says whether the row under the cursor is
 // a live kitty session or somewhere to go.
 func (m Model) separatorRule() string {
-	width := m.contentWidth() - 2
-	if width < 1 {
-		width = 1
-	}
-	return lipgloss.NewStyle().Faint(true).Render("  " + strings.Repeat("─", width))
+	return m.th.Rule(m.contentWidth())
 }
 
 // indexGutter renders the jump number for the row at position i, or blanks of
 // the same width once the numbers run out, so every name stays aligned.
-func indexGutter(i int, style lipgloss.Style) string {
+func indexGutter(i int, style func(string) string) string {
 	if i >= maxIndexJump {
 		return "  "
 	}
-	return style.Render(fmt.Sprintf("%d ", i+1))
+	return style(strconv.Itoa(i+1)) + " "
 }
 
-// headerLines is the filter row plus the blank line under it, which the
-// preview pane skips so its first line sits level with the first session row.
-const headerLines = 2
+// The picker's frame, top to bottom: the masthead, the tabs, the filter row
+// and a blank line (headerLines), the list beside the preview pane, then the
+// status bar, a rule and the hints (footerLines). filterRow is the line the
+// filter input is on.
+const (
+	headerLines = 4
+	footerLines = 2
+	filterRow   = 2
+)
 
 // previewView renders the preview pane: a left divider, then the content of the
-// highlighted session clipped to the pane.
+// highlighted session clipped to the pane, rows lines high so its first line
+// sits level with the first session row.
 func (m Model) previewView(cols, rows int) string {
-	faint := lipgloss.NewStyle().Faint(true)
+	faint := lipgloss.NewStyle().Foreground(m.th.Colors.Muted)
 
 	var body string
 	switch {
@@ -1252,11 +1419,11 @@ func (m Model) previewView(cols, rows int) string {
 
 	return lipgloss.NewStyle().
 		Border(border, false, false, false, drawn).
-		BorderForeground(lipgloss.ANSIColor(8)).
+		BorderForeground(m.th.Colors.Subtle).
 		PaddingLeft(previewPadding).
-		PaddingTop(headerLines).
 		Width(cols).
-		Height(headerLines + rows).
+		Height(rows).
+		MaxHeight(rows).
 		Render(body)
 }
 

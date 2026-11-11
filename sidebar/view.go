@@ -1,6 +1,7 @@
 package sidebar
 
 import (
+	"charm.land/bubbles/v2/key"
 	"cmp"
 	"fmt"
 	"strconv"
@@ -13,10 +14,17 @@ import (
 	"github.com/xheisenbugx/ksesh/agent"
 	ansicolor "github.com/xheisenbugx/ksesh/ansi"
 	"github.com/xheisenbugx/ksesh/model"
+	"github.com/xheisenbugx/ksesh/ui"
 )
 
-// headerLines are the title, the line under it and a blank one.
-const headerLines = 3
+// top is the lines over the list: the title, the line under it and a blank
+// one, and in the picker the filter between those.
+func (m Model) top() int {
+	if m.opts.Picker {
+		return 4
+	}
+	return 3
+}
 
 // newButtonWidth is the cells of the new thread button at the right end of
 // the title.
@@ -58,23 +66,8 @@ var spinner = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "
 
 const spinEvery = 100 * time.Millisecond
 
-// SGR pieces that only undo what they set, so a row's background survives
-// the colors drawn on top of it.
-func fg(code int, s string) string { return fmt.Sprintf("\033[%dm%s\033[39m", code, s) }
-func bold(s string) string         { return "\033[1m" + s + "\033[22m" }
-
-// paint pads a line to the full width, on a background if one is given.
-func paint(content string, bg string, width int) string {
-	content = ansi.Truncate(content, width, "…")
-	pad := strings.Repeat(" ", max(width-ansi.StringWidth(content), 0))
-	if bg == "" {
-		return content + pad
-	}
-	return bg + content + pad + "\033[49m"
-}
-
 func (m Model) listHeight() int {
-	return max(m.height-headerLines-len(m.footer()), 0)
+	return max(m.height-m.top()-len(m.footer()), 0)
 }
 
 // lineRows maps every line of the list to the row drawn on it, with the
@@ -128,13 +121,16 @@ func (m *Model) scrollToCursor() {
 
 func (m Model) View() tea.View {
 	out := m.title()
+	if m.opts.Picker {
+		out = append(out, ui.Paint(" "+m.query.View(), "", m.width))
+	}
 	out = append(out, "")
 	if m.mode == modeHelp {
 		help := m.helpLines()
 		for i := range m.listHeight() {
 			line := ""
 			if j := i + m.helpOffset; j < len(help) {
-				line = paint(help[j], "", m.width)
+				line = ui.Paint(help[j], "", m.width)
 			}
 			out = append(out, line)
 		}
@@ -162,6 +158,9 @@ func (m Model) View() tea.View {
 			}
 			out = append(out, line)
 		}
+		if m.previewShown() {
+			out = m.besidePreview(out)
+		}
 	}
 	out = append(out, m.footer()...)
 	if m.mode == modeMenu {
@@ -172,6 +171,9 @@ func (m Model) View() tea.View {
 	v.MouseMode = tea.MouseModeAllMotion
 	v.ReportFocus = true
 	v.WindowTitle = "threads"
+	if m.opts.Picker {
+		v.WindowTitle = "agents"
+	}
 	return v
 }
 
@@ -182,24 +184,22 @@ func (m Model) View() tea.View {
 //	Threads ╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱  +
 //	all sessions · 6             1  1
 func (m Model) title() []string {
-	name := " Threads "
 	// At the right end, the new thread button.
-	stripes := strings.Repeat("╱", max(m.width-ansi.StringWidth(name)-newButtonWidth, 0))
-	plus := " " + m.th.accented(iconNew) + " "
+	plus := " " + m.th.Accented(iconNew) + " "
 	if m.hoverNew {
-		plus = m.th.button + plus + "\033[49m"
+		plus = m.th.Button + plus + "\033[49m"
 	}
-	top := m.th.gradient(name+stripes, len([]rune(name))) + plus
+	top := m.th.Masthead(m.name(), m.width, plus)
 
 	scope := "all sessions"
 	if m.state.Session && m.session != "" {
 		scope = m.session
 	}
-	left := " " + m.th.mute(scope)
+	left := " " + m.th.Mute(scope)
 	switch {
 	case m.loaded && m.filter != "":
 		// How many of them the filter keeps.
-		left += m.th.dim(" · ") + m.th.accented("/"+m.filter) + " " + m.th.mute(strconv.Itoa(len(m.board().Ordered(agent.Sections...))))
+		left += m.th.Dim(" · ") + m.th.Accented("/"+m.filter) + " " + m.th.Mute(strconv.Itoa(len(m.board().Ordered(agent.Sections...))))
 	case m.loaded:
 		live := 0
 		for _, a := range m.agents {
@@ -207,12 +207,12 @@ func (m Model) title() []string {
 				live++
 			}
 		}
-		left += m.th.dim(" · ") + m.th.mute(strconv.Itoa(live))
+		left += m.th.Dim(" · ") + m.th.Mute(strconv.Itoa(live))
 	}
 	var right []string
 	switch {
 	case m.err != nil:
-		right = append(right, fg(ansicolor.Red, "kitty unreachable"))
+		right = append(right, ui.Fg(ansicolor.Red, "kitty unreachable"))
 	case m.loaded:
 		counts := map[agent.Badge]int{}
 		for _, a := range m.board().Ordered(agent.Pinned, agent.Active) {
@@ -221,26 +221,11 @@ func (m Model) title() []string {
 		for _, badge := range []agent.Badge{agent.Badge(agent.Waiting), agent.Badge(agent.Error), agent.BadgeWoke, agent.Badge(agent.Done)} {
 			if n := counts[badge]; n > 0 {
 				icon, color := badgeIcon(badge)
-				right = append(right, fg(color, icon+" "+strconv.Itoa(n)))
+				right = append(right, ui.Fg(color, icon+" "+strconv.Itoa(n)))
 			}
 		}
 	}
-	return []string{paint(top, "", m.width), spread(left, strings.Join(right, "  "), m.width)}
-}
-
-// spread puts left and right at the two ends of a line width wide, cutting
-// left when they don't both fit.
-func spread(left, right string, width int) string {
-	if right == "" {
-		return paint(left, "", width)
-	}
-	right += " "
-	lw, rw := ansi.StringWidth(left), ansi.StringWidth(right)
-	if lw+1+rw > width {
-		left = ansi.Truncate(left, max(width-rw-1, 0), "…")
-		lw = ansi.StringWidth(left)
-	}
-	return left + strings.Repeat(" ", max(width-lw-rw, 1)) + right
+	return []string{top, ui.Spread(left, strings.Join(right, "  "), m.width)}
 }
 
 // background is a row's: the selected row's while the sidebar has the
@@ -251,32 +236,29 @@ func (m Model) background(r row) string {
 	case key == "":
 		return ""
 	case m.focused && key == m.cursor:
-		return m.th.selected
+		return m.th.Selected
 	case key == m.hover:
-		return m.th.hover
+		return m.th.Hover
 	}
 	return ""
 }
 
 // bar is a row's left edge: an accent bar on the selected row.
 func (m Model) bar(r row) string {
-	if m.focused && rowKey(r) != "" && rowKey(r) == m.cursor {
-		return m.th.accented("▌")
-	}
-	return " "
+	return m.th.Bar(m.focused && rowKey(r) != "" && rowKey(r) == m.cursor)
 }
 
 func (m Model) renderRow(r row) []string {
 	bg := m.background(r)
 	switch r.kind {
 	case rowFill:
-		return []string{paint("", "", m.width)}
+		return []string{ui.Paint("", "", m.cols())}
 	case rowRule:
-		return []string{" " + m.th.dim(strings.Repeat("─", max(m.width-2, 0))) + " "}
+		return []string{m.th.Rule(m.cols())}
 	case rowEmpty:
 		return m.renderEmpty(r)
 	case rowMore:
-		return []string{paint(m.bar(r)+"   "+m.th.mute(fmt.Sprintf("⋯ %d more", r.count)), bg, m.width)}
+		return []string{ui.Paint(m.bar(r)+"   "+m.th.Mute(fmt.Sprintf("⋯ %d more", r.count)), bg, m.cols())}
 	case rowHeader:
 		return []string{m.renderHeader(r, bg)}
 	case rowGroup:
@@ -287,18 +269,14 @@ func (m Model) renderRow(r row) []string {
 
 // renderEmpty is the inbox with nothing in it, centered.
 func (m Model) renderEmpty(r row) []string {
-	icon, head, sub := fg(ansicolor.Green, iconDone), "All caught up", "nothing needs you"
+	icon, head, sub := ui.Fg(ansicolor.Green, iconDone), "All caught up", "nothing needs you"
 	switch {
 	case m.filter != "":
-		icon, head, sub = m.th.mute(iconSearch), "Nothing in the inbox", "matches /"+m.filter+", esc clears it"
+		icon, head, sub = m.th.Mute(iconSearch), "Nothing in the inbox", "matches "+m.filterLabel()+", esc clears it"
 	case r.none:
-		icon, head, sub = m.th.mute(iconRobot), "No agents yet", "n starts one here"
+		icon, head, sub = m.th.Mute(iconRobot), "No agents yet", m.keys.label(actNew)+" starts one here"
 	}
-	center := func(s string) string {
-		pad := max((m.width-ansi.StringWidth(s))/2, 0)
-		return paint(strings.Repeat(" ", pad)+s, "", m.width)
-	}
-	return []string{"", center(icon + " " + bold(head)), center(m.th.mute(sub)), ""}
+	return []string{"", ui.Center(icon+" "+ui.Bold(head), m.cols()), ui.Center(m.th.Mute(sub), m.cols()), ""}
 }
 
 var sectionNames = map[agent.Section]string{
@@ -322,30 +300,27 @@ func (m Model) renderHeader(r row, bg string) string {
 		if r.section == agent.Active {
 			icon = iconInbox
 		}
-		label := " " + m.th.mute(icon) + " " + m.th.head(strings.ToUpper(name)) + " "
-		count := " " + m.th.mute(strconv.Itoa(r.count)) + " "
-		rule := max(m.width-ansi.StringWidth(label)-ansi.StringWidth(count), 0)
-		return paint(label+m.th.dim(strings.Repeat("─", rule))+count, bg, m.width)
+		return m.th.Section(icon, strings.ToUpper(name), r.count, m.cols(), bg)
 	}
 	caret := "▸"
-	if m.state.Expanded[r.section] {
+	if m.expanded()[r.section] {
 		caret = "▾"
 	}
 	var icon string
 	switch r.section {
 	case agent.SectionWorking:
-		icon = fg(ansicolor.Blue, spinner[m.frame%len(spinner)])
+		icon = ui.Fg(ansicolor.Blue, spinner[m.frame%len(spinner)])
 	case agent.Snoozed:
-		icon = m.th.mute(iconClock)
+		icon = m.th.Mute(iconClock)
 	case agent.Settled:
-		icon = m.th.mute(iconSettle)
+		icon = m.th.Mute(iconSettle)
 	}
-	right := m.th.mute(strconv.Itoa(r.count))
+	right := m.th.Mute(strconv.Itoa(r.count))
 	if r.holdsCurrent {
-		right = m.th.accented(here) + " " + right
+		right = m.th.Accented(here) + " " + right
 	}
-	left := m.bar(r) + m.th.mute(caret) + " " + icon + " " + name
-	return paint(spread(left, right, m.width), bg, m.width)
+	left := m.bar(r) + m.th.Mute(caret) + " " + icon + " " + name
+	return ui.Paint(ui.Spread(left, right, m.cols()), bg, m.cols())
 }
 
 // renderGroup names the session of the inbox threads under it, its rule
@@ -354,10 +329,7 @@ func (m Model) renderHeader(r row, bg string) string {
 //	api ─────────────────── 2
 func (m Model) renderGroup(r row) string {
 	name := cmpOr(r.session, "no session")
-	label := "  " + m.th.mute(iconFolder) + " " + m.th.head(name) + " "
-	count := " " + m.th.mute(strconv.Itoa(r.count)) + " "
-	rule := max(m.width-ansi.StringWidth(label)-ansi.StringWidth(count), 0)
-	return paint(label+m.th.dim(strings.Repeat("─", rule))+count, "", m.width)
+	return m.th.LabelRule("  "+m.th.Mute(iconFolder)+" "+m.th.Head(name)+" ", r.count, m.cols(), "")
 }
 
 func badgeIcon(badge agent.Badge) (string, int) {
@@ -397,40 +369,40 @@ func (m Model) renderThread(r row, bg string) []string {
 	case putAway:
 		color = 0
 	}
-	iconText := m.th.mute(icon)
+	iconText := m.th.Mute(icon)
 	if color != 0 {
-		iconText = fg(color, icon)
+		iconText = ui.Fg(color, icon)
 	}
 
 	dot := " "
 	if !a.Closed && a.WindowID == m.current {
-		dot = m.th.accented(here)
+		dot = m.th.Accented(here)
 	}
 	bar := m.bar(r)
 	// At the right, the time and the dot; under the mouse, the buttons.
-	right := m.th.mute(m.meta(a, section)) + " " + dot + " "
+	right := m.th.Mute(m.meta(a, section)) + " " + dot + " "
 	if m.mode == modeNormal && rowKey(r) == m.hover {
 		right = m.renderButtons(r, bg)
 	}
 	// bar, space, icon, space | title | space, right
-	room := max(m.width-4-1-ansi.StringWidth(right), 1)
+	room := max(m.cols()-4-1-ansi.StringWidth(right), 1)
 	name := ansi.Truncate(title(a), room, "…")
 	unread := !putAway && agent.IsUnread(a)
 	needsYou := unread || badge == agent.Badge(agent.Waiting) || badge == agent.Badge(agent.Error) || badge == agent.BadgeWoke
 	switch {
 	case putAway:
-		name = m.th.mute(name)
+		name = m.th.Mute(name)
 	case needsYou:
-		name = bold(name)
+		name = ui.Bold(name)
 	}
 	mark := " "
 	if unread {
-		mark = m.th.accented(unreadMark)
+		mark = m.th.Accented(unreadMark)
 	}
 	gap := strings.Repeat(" ", max(room-ansi.StringWidth(ansi.Strip(name)), 0)+1)
 	first := bar + mark + iconText + " " + name + gap + right
 	second := bar + "   " + m.subtitle(a, section, badge)
-	return []string{paint(first, bg, m.width), paint(second, bg, m.width), paint("", "", m.width)}
+	return []string{ui.Paint(first, bg, m.cols()), ui.Paint(second, bg, m.cols()), ui.Paint("", "", m.cols())}
 }
 
 // minSubtitle is the least of a thread's session and what it is on that the
@@ -477,7 +449,7 @@ func (m Model) subtitle(a *model.Agent, section agent.Section, badge agent.Badge
 	case a.Prompt != "":
 		what = "› " + a.Prompt
 	}
-	room := max(m.width-5, 1)
+	room := max(m.cols()-5, 1)
 	if where != "" && what != "" {
 		where += " · "
 	}
@@ -502,13 +474,13 @@ func (m Model) subtitle(a *model.Agent, section agent.Section, badge agent.Badge
 	what = ansi.Truncate(what, max(room-ansi.StringWidth(where), 0), "…")
 	out := ""
 	if where != "" {
-		out = m.th.mute(where)
+		out = m.th.Mute(where)
 	}
 	if what != "" {
 		if color != 0 {
-			out += fg(color, what)
+			out += ui.Fg(color, what)
 		} else {
-			out += m.th.mute(what)
+			out += m.th.Mute(what)
 		}
 	}
 	if label != "" {
@@ -568,103 +540,117 @@ func short(d time.Duration) string {
 // title is what a thread is called: see agent.Title.
 func title(a *model.Agent) string { return agent.Title(a) }
 
-// hint is a key and what it does, for the footer.
-type hint struct{ key, does string }
+// hints are the keys worth showing for what is selected, most useful first,
+// the key to the help last. The picker always offers its diff, which shows
+// beside the list.
+func (m Model) hints() []key.Binding {
+	hints := m.threadHints()
+	if !m.opts.Picker || len(hints) < 2 {
+		return hints
+	}
+	if _, ok := m.selectedAgent(); !ok {
+		return hints
+	}
+	diff := m.keys.says(actReview, "diff")
+	if m.previewDiff {
+		diff = m.keys.says(actReview, "screen")
+	}
+	for _, h := range hints {
+		if h.Help().Key == diff.Help().Key {
+			diff.SetEnabled(false)
+		}
+	}
+	extra := []key.Binding{diff}
+	if a, _ := m.selectedAgent(); agent.Status(a.Status) == agent.Done || agent.Status(a.Status) == agent.Error {
+		extra = append(extra, m.keys.says(actSeen, "seen"))
+	}
+	last := len(hints) - 1
+	return append(append(hints[:last:last], extra...), hints[last])
+}
 
-// hints are the keys worth showing for what is selected, most useful first.
-func (m Model) hints() []hint {
+func (m Model) threadHints() []key.Binding {
+	k := m.keys
+	help := k.says(actHelp, "keys")
 	r, _, ok := m.selected()
 	if !ok {
-		return []hint{{"n", "new thread"}, {"?", "keys"}}
+		return []key.Binding{k.says(actNew, "new thread"), help}
 	}
 	switch r.kind {
 	case rowHeader:
 		does := "open"
-		if m.state.Expanded[r.section] {
+		if m.expanded()[r.section] {
 			does = "close"
 		}
-		return []hint{{"↵", does}, {"?", "keys"}}
+		return []key.Binding{k.says(actGo, does), help}
 	case rowMore:
-		return []hint{{"↵", "show all"}, {"?", "keys"}}
+		return []key.Binding{k.says(actGo, "show all"), help}
 	}
 	a := r.agent
 	switch {
 	case a.Closed:
-		return []hint{{"↵", "resume"}, {"X", "forget"}, {"?", "keys"}}
+		return []key.Binding{k.says(actGo, "resume"), k.says(actClose, "forget"), help}
 	case r.section == agent.Snoozed:
-		return []hint{{"↵", "go"}, {"w", "wake"}, {"u", "undo"}, {"?", "keys"}}
+		return []key.Binding{k.says(actGo, "go"), k.says(actWake, "wake"), k.says(actUndo, "undo"), help}
 	case r.section == agent.Settled:
-		return []hint{{"↵", "go"}, {"s", "restore"}, {"u", "undo"}, {"?", "keys"}}
+		return []key.Binding{k.says(actGo, "go"), k.says(actSettle, "restore"), k.says(actUndo, "undo"), help}
 	}
 	pin := "pin"
 	if a.Thread.Pin != 0 {
 		pin = "unpin"
 	}
+	review := k.says(actReview, "review")
+	if m.opts.Picker {
+		review = k.says(actReview, "diff")
+		if m.previewDiff {
+			review = k.says(actReview, "screen")
+		}
+	}
 	switch agent.Status(a.Status) {
 	case agent.Waiting:
-		return []hint{{"a", "approve"}, {"x", "deny"}, {"r", "reply"}, {"↵", "go"}, {"z", "snooze"}, {"?", "keys"}}
+		return []key.Binding{k.says(actApprove, "approve"), k.says(actDeny, "deny"), k.says(actReply, "reply"), k.says(actGo, "go"), k.says(actSnooze, "snooze"), help}
 	case agent.Working:
-		return []hint{{"↵", "go"}, {"x", "stop"}, {"r", "reply"}, {"p", pin}, {"?", "keys"}}
+		return []key.Binding{k.says(actGo, "go"), k.says(actDeny, "stop"), k.says(actReply, "reply"), k.says(actPin, pin), help}
 	}
 	if agent.BadgeOf(a, m.now) == agent.BadgeWoke {
-		return []hint{{"↵", "go"}, {"w", "dismiss"}, {"s", "settle"}, {"?", "keys"}}
+		return []key.Binding{k.says(actGo, "go"), k.says(actWake, "dismiss"), k.says(actSettle, "settle"), help}
 	}
 	if agent.Status(a.Status) == agent.Done {
 		if _, ok := m.pullRequest(a); ok {
-			return []hint{{"↵", "go"}, {"d", "review"}, {"P", "pr"}, {"s", "settle"}, {"?", "keys"}}
+			return []key.Binding{k.says(actGo, "go"), review, k.says(actPR, "pr"), k.says(actSettle, "settle"), help}
 		}
-		return []hint{{"↵", "go"}, {"d", "review"}, {"s", "settle"}, {"p", pin}, {"?", "keys"}}
+		return []key.Binding{k.says(actGo, "go"), review, k.says(actSettle, "settle"), k.says(actPin, pin), help}
 	}
-	return []hint{{"↵", "go"}, {"s", "settle"}, {"p", pin}, {"z", "snooze"}, {"d", "review"}, {"?", "keys"}}
+	return []key.Binding{k.says(actGo, "go"), k.says(actSettle, "settle"), k.says(actPin, pin), k.says(actSnooze, "snooze"), review, help}
 }
 
 // key is a key as the footer and the help show it.
-func (m Model) key(k string) string { return m.th.accented(bold(k)) }
-
-// hintLine fits as many hints as there is room for, keeping the last one
-// ("? keys") so the rest can always be found.
-func (m Model) hintLine(hints []hint) string {
-	render := func(hs []hint) string {
-		parts := make([]string, len(hs))
-		for i, h := range hs {
-			parts[i] = m.key(h.key) + " " + m.th.mute(h.does)
-		}
-		return " " + strings.Join(parts, m.th.dim(" · "))
-	}
-	for len(hints) > 1 {
-		if line := render(hints); ansi.StringWidth(line) <= m.width {
-			return line
-		}
-		hints = append(hints[:len(hints)-2:len(hints)-2], hints[len(hints)-1])
-	}
-	return render(hints)
-}
+func (m Model) key(k string) string { return m.th.Key(k) }
 
 // footer is the status bar under the list: a rule, then the keys for what is
 // selected, the menu or prompt open, or what was just done.
 func (m Model) footer() []string {
-	line := func(s string) string { return paint(s, "", m.width) }
-	lines := []string{" " + m.th.dim(strings.Repeat("─", max(m.width-2, 0))) + " "}
+	line := func(s string) string { return ui.Paint(s, "", m.width) }
+	lines := []string{m.th.Rule(m.width)}
 	if in, ok := inputs[m.mode]; ok {
-		return append(lines, line(" "+m.th.accented(bold(cmp.Or(m.ask, in.label)))), line(" "+m.input.View()))
+		return append(lines, line(" "+m.th.Accented(ui.Bold(cmp.Or(m.ask, in.label)))), line(" "+m.input.View()))
 	}
 	switch m.mode {
 	case modeSnooze:
-		lines = append(lines, line(" "+m.th.accented(bold("Snooze until"))))
+		lines = append(lines, line(" "+m.th.Accented(ui.Bold("Snooze until"))))
 		for i, p := range agent.SnoozePresets(m.now) {
-			lines = append(lines, spread(" "+m.key(strconv.Itoa(i+1))+" "+p.Label, m.th.mute(when(p.Until, m.now)), m.width))
+			lines = append(lines, ui.Spread(" "+m.key(strconv.Itoa(i+1))+" "+p.Label, m.th.Mute(when(p.Until, m.now)), m.width))
 		}
-		return append(lines, line(" "+m.key("c")+" "+m.th.mute("other time")+m.th.dim(" · ")+m.key("esc")+" "+m.th.mute("cancel")))
+		return append(lines, line(" "+m.key("c")+" "+m.th.Mute("other time")+m.th.Dim(" · ")+m.key("esc")+" "+m.th.Mute("cancel")))
 	case modeMenu:
-		return append(lines, m.hintLine([]hint{{"↵", "pick"}, {"j k", "move"}, {"esc", "close"}}))
+		return append(lines, m.th.Hints([]key.Binding{ui.Bind("↵", "pick", "enter"), ui.Bind("↑ ↓", "move", "up"), ui.Bind("esc", "close", "esc")}, m.width))
 	case modeConfirmClose:
 		ask := "Close the agent's window?"
 		if a, ok := m.selectedAgent(); ok && a.Closed {
 			ask = "Forget the closed thread?"
 		}
-		return append(lines, line(" "+fg(ansicolor.Red, ask)+" "+m.key("y")+m.th.mute("/n")))
+		return append(lines, line(" "+ui.Fg(ansicolor.Red, ask)+" "+m.key("y")+m.th.Mute("/n")))
 	case modeConfirmArchive:
-		return append(lines, line(" "+fg(ansicolor.Red, "Remove its worktree, branch")), line(" "+fg(ansicolor.Red, "and window?")+" "+m.key("y")+m.th.mute("/n")))
+		return append(lines, line(" "+ui.Fg(ansicolor.Red, "Remove its worktree, branch")), line(" "+ui.Fg(ansicolor.Red, "and window?")+" "+m.key("y")+m.th.Mute("/n")))
 	}
 	if m.flash != "" && m.opts.Now().Before(m.until) {
 		if m.failed {
@@ -673,75 +659,52 @@ func (m Model) footer() []string {
 			for i, l := range wrapped[:min(len(wrapped), 3)] {
 				mark := "  "
 				if i == 0 {
-					mark = fg(ansicolor.Red, "✗") + " "
+					mark = ui.Fg(ansicolor.Red, "✗") + " "
 				}
 				lines = append(lines, line(" "+mark+l))
 			}
 			return lines
 		}
-		return append(lines, line(" "+fg(ansicolor.Green, "✓")+" "+m.flash))
+		return append(lines, line(" "+ui.Fg(ansicolor.Green, "✓")+" "+m.flash))
 	}
 	if b, ok := m.hoveredButton(); ok {
-		return append(lines, line(" "+m.th.accented(b.icon)+"  "+b.label+"  "+m.key(b.key)))
+		return append(lines, line(" "+m.th.Accented(b.icon)+"  "+b.label+"  "+m.key(m.right(b))))
 	}
 	if m.hoverNew && m.mode == modeNormal {
-		return append(lines, line(" "+m.th.accented(iconNew)+"  new thread  "+m.key("n")))
+		return append(lines, line(" "+m.th.Accented(iconNew)+"  new thread  "+m.key(m.keys.label(actNew))))
 	}
 	if !m.focused {
 		return append(lines, line(""))
 	}
 	hints := m.hints()
 	if m.filter != "" {
-		hints = append([]hint{{"esc", "unfilter"}}, hints...)
+		hints = append([]key.Binding{m.keys.says(actBack, "unfilter")}, hints...)
 	}
-	return append(lines, m.hintLine(hints))
+	return append(lines, m.th.Hints(hints, m.width))
 }
 
-// helpLines is the help screen, shown in place of the list.
+// helpLines is the help screen, shown in place of the list: one column in
+// the sidebar, as many as fit in the picker.
 func (m Model) helpLines() []string {
-	section := func(s string) string { return " " + m.th.head(strings.ToUpper(s)) }
-	entry := func(keys, does string) string {
-		return "  " + m.key(keys) + strings.Repeat(" ", max(9-ansi.StringWidth(keys), 1)) + does
+	var lines []string
+	if m.opts.Picker {
+		lines = m.th.HelpColumns(m.helpSections(), m.width)
+	} else {
+		lines = m.th.HelpList(m.helpSections())
 	}
-	return []string{
-		section("Threads"),
-		entry("↵ l", "go to, or resume, a thread"),
-		entry("esc h", "back to your window"),
-		entry("j k g G", "move"),
-		entry("tab", "next section"),
-		entry("1-9", "go to the nth thread"),
-		entry("n N", "new thread, worktree"),
-		"",
-		section("Triage"),
-		entry("p", "pin, unpin"),
-		entry("K J", "move a pin up, down"),
-		entry("s", "settle, restore"),
-		entry("z w", "snooze, wake"),
-		entry("u", "undo"),
-		entry("m", "menu, or right click"),
-		"",
-		section("The agent"),
-		entry("a", "approve"),
-		entry("x", "deny, interrupt"),
-		entry("r", "reply"),
-		entry("d", "review its changes"),
-		entry("P", "open its pull request"),
-		entry("R", "rename the thread"),
-		entry("X", "close its window, forget"),
-		entry("A", "archive its worktree"),
-		"",
-		section("Sidebar"),
-		entry("/", "filter; esc clears it"),
-		entry("o", "group by session"),
-		entry("f", "this session, all"),
-		entry("< >", "narrower, wider"),
-		entry("q", "hide everywhere"),
-		"",
-		"  " + m.th.mute("j k scroll, other keys: back"),
-	}
+	return append(lines, "", "  "+m.th.Mute("↑ ↓ scroll, other keys: back"))
 }
 
 // scrollHelp moves the help screen by delta lines, as far as it goes.
 func (m *Model) scrollHelp(delta int) {
 	m.helpOffset = max(min(m.helpOffset+delta, len(m.helpLines())-m.listHeight()), 0)
+}
+
+// filterLabel is the filter as the sidebar shows it: after the / that
+// started it, or as typed in the picker.
+func (m Model) filterLabel() string {
+	if m.opts.Picker {
+		return m.filter
+	}
+	return "/" + m.filter
 }

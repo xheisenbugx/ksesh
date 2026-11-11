@@ -13,6 +13,7 @@ import (
 	"github.com/xheisenbugx/ksesh/agent"
 	"github.com/xheisenbugx/ksesh/kitty"
 	"github.com/xheisenbugx/ksesh/model"
+	"github.com/xheisenbugx/ksesh/ui"
 )
 
 // typeText types text into whatever has the keyboard, a key at a time.
@@ -47,7 +48,7 @@ func TestUnreadThreadsAreMarked(t *testing.T) {
 	}
 	a := m.agents[1]
 	require.Equal(t, 2, a.WindowID)
-	assert.Contains(t, strings.Join(m.renderThread(row{kind: rowThread, section: agent.Active, agent: a}, ""), "\n"), bold("Write docs"))
+	assert.Contains(t, strings.Join(m.renderThread(row{kind: rowThread, section: agent.Active, agent: a}, ""), "\n"), ui.Bold("Write docs"))
 }
 
 func TestReviewOpensOverTheWindowBesideTheSidebar(t *testing.T) {

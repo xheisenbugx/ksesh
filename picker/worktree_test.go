@@ -157,7 +157,7 @@ func m9NumberWidth(t *testing.T, out string) int {
 	t.Helper()
 	for _, line := range strings.Split(out, "\n") {
 		if strings.Contains(line, "MERGED") {
-			return strings.Index(line, "9") + 1 - 2 // less the two-column prefix
+			return len([]rune(line[:strings.Index(line, "9")])) + 1 - 2 // less the bar and the space after it
 		}
 	}
 	t.Fatal("expected a row for worktree 9")
@@ -390,8 +390,9 @@ func TestWorktreeModel_ScrollsWithinVisibleRows(t *testing.T) {
 	}
 	m := NewWorktreeModel(testWorktreeFetchFunc(entries), testWorktreeOptions())
 	result, _ := m.Update(worktreesLoadedMsg{entries: entries})
-	// Five rows fit: seven lines less the filter row and the blank under it.
-	result, _ = result.(WorktreeModel).Update(tea.WindowSizeMsg{Width: 80, Height: 7})
+	// Five rows fit: eleven lines less the header (masthead, status, filter
+	// and a blank) and the status bar.
+	result, _ = result.(WorktreeModel).Update(tea.WindowSizeMsg{Width: 80, Height: headerLines + 5 + footerLines})
 	m = result.(WorktreeModel)
 	require.Equal(t, 5, m.visibleCount())
 
@@ -403,7 +404,7 @@ func TestWorktreeModel_ScrollsWithinVisibleRows(t *testing.T) {
 	assert.Equal(t, 2, m.offset, "the list scrolls to keep the cursor visible")
 
 	// The frame stays exactly the height of the terminal however far it scrolls.
-	assert.Len(t, strings.Split(worktreeView(m), "\n"), 7)
+	assert.Len(t, strings.Split(worktreeView(m), "\n"), headerLines+5+footerLines)
 }
 
 func TestWorktreeView_ClipsLongTitles(t *testing.T) {
@@ -450,8 +451,8 @@ func TestWorktreeView_CursorMarksHighlightedRow(t *testing.T) {
 	m := newTestWorktreeModel()
 	lines := strings.Split(worktreeView(m), "\n")
 
-	assert.True(t, strings.HasPrefix(lines[2], "> "), "the first row starts highlighted")
-	assert.True(t, strings.HasPrefix(lines[3], "  "), "other rows are not")
+	assert.True(t, strings.HasPrefix(lines[headerLines], "▌ "), "the first row starts highlighted")
+	assert.True(t, strings.HasPrefix(lines[headerLines+1], "  "), "other rows are not")
 }
 
 func TestWorktreeModel_CtrlR_RefetchesIgnoringTheCache(t *testing.T) {

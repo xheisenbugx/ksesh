@@ -1,15 +1,19 @@
 package picker
 
 import (
+	"image/color"
 	"strconv"
 	"strings"
 
+	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/sahilm/fuzzy"
 
+	ansicolor "github.com/xheisenbugx/ksesh/ansi"
 	"github.com/xheisenbugx/ksesh/model"
+	"github.com/xheisenbugx/ksesh/ui"
 )
 
 // WorktreeFetchFunc loads the worktree entries asynchronously. It is called in a
@@ -203,6 +207,11 @@ type WorktreeModel struct {
 	// numberWidth is the width of the widest number, which the column is
 	// right-aligned to so the numbers read as a column.
 	numberWidth int
+
+	// th is the palette, from the terminal's colors once it says them.
+	th      ui.Theme
+	bg, fgc color.Color
+	keys    keyMap
 }
 
 func NewWorktreeModel(fetchFunc WorktreeFetchFunc, opts WorktreeOptions) WorktreeModel {
@@ -219,13 +228,15 @@ func NewWorktreeModel(fetchFunc WorktreeFetchFunc, opts WorktreeOptions) Worktre
 		fetchFunc:   fetchFunc,
 		showIcons:   opts.ShowIcons,
 		autoRefresh: opts.AutoRefresh,
+		th:          ui.ThemeFor(nil, nil),
+		keys:        newKeyMap("open"),
 	}
 	m.focusCmd = m.filterInput.Focus()
 	return m
 }
 
 func (m WorktreeModel) Init() tea.Cmd {
-	return tea.Batch(m.focusCmd, m.fetchWorktrees(false))
+	return tea.Batch(m.focusCmd, m.fetchWorktrees(false), tea.RequestBackgroundColor, tea.RequestForegroundColor)
 }
 
 func (m WorktreeModel) fetchWorktrees(refresh bool) tea.Cmd {
@@ -237,7 +248,7 @@ func (m WorktreeModel) fetchWorktrees(refresh bool) tea.Cmd {
 }
 
 func (m *WorktreeModel) syncInputWidth() {
-	m.filterInput.SetWidth(m.width - 4)
+	m.filterInput.SetWidth(m.width - len(filterIndent) - 2)
 }
 
 func (m WorktreeModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -290,9 +301,19 @@ func (m WorktreeModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.syncInputWidth()
 		return m, nil
 
+	case tea.BackgroundColorMsg:
+		m.bg = msg.Color
+		m.th = ui.ThemeFor(m.bg, m.fgc)
+		return m, nil
+
+	case tea.ForegroundColorMsg:
+		m.fgc = msg.Color
+		m.th = ui.ThemeFor(m.bg, m.fgc)
+		return m, nil
+
 	case tea.KeyPressMsg:
-		switch msg.String() {
-		case "enter":
+		switch {
+		case key.Matches(msg, m.keys.Choose):
 			if m.loading {
 				return m, nil
 			}
@@ -302,27 +323,27 @@ func (m WorktreeModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, tea.Quit
 
-		case "esc", "ctrl+c":
+		case key.Matches(msg, m.keys.Quit):
 			m.quit = true
 			return m, tea.Quit
 
-		case "up", "ctrl+k", "ctrl+p":
+		case key.Matches(msg, m.keys.Up):
 			m.cursorUp(1)
 			return m, nil
 
-		case "down", "ctrl+j", "ctrl+n":
+		case key.Matches(msg, m.keys.Down):
 			m.cursorDown(1)
 			return m, nil
 
-		case "ctrl+u":
+		case key.Matches(msg, m.keys.HalfUp):
 			m.cursorUp(m.visibleCount() / 2)
 			return m, nil
 
-		case "ctrl+d":
+		case key.Matches(msg, m.keys.HalfDown):
 			m.cursorDown(m.visibleCount() / 2)
 			return m, nil
 
-		case "ctrl+r":
+		case key.Matches(msg, m.keys.Refresh):
 			// Refetch every title and state, ignoring the cache. The rows
 			// already on screen stay put and are replaced when it lands, so a
 			// refresh over a slow network is not a blank list.
@@ -438,68 +459,83 @@ func (m *WorktreeModel) cursorDown(n int) {
 }
 
 // visibleCount is how many worktree rows fit. The picker runs on the alt
-// screen, so it gets every row apart from the filter row and the blank line
-// under it.
+// screen, so it gets every row apart from the header and the status bar, laid
+// out as the session picker's are.
 func (m WorktreeModel) visibleCount() int {
-	available := m.height - headerLines
+	available := m.height - headerLines - footerLines
 	if available < 1 {
 		return fallbackVisibleCount
 	}
 	return available
 }
 
+// View draws the worktree picker as the session picker is drawn:
+//
+//	 Worktrees ╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱
+//	 Refreshing worktrees...                     8
+//	  › 409
+//
+//	▌ 409  OPEN    Add opt-in preview pane
+//	 ─────────────────────────────────────────────
+//	 ↵ open · ^r refresh · esc quit
 func (m WorktreeModel) View() tea.View {
-	var b strings.Builder
-
 	visible := m.visibleCount()
-	faint := lipgloss.NewStyle().Faint(true)
+	width := m.width
+	if width <= 0 {
+		width = minListWidth
+	}
 
-	b.WriteString("  " + m.filterInput.View())
-	b.WriteString("\n")
-	// The blank line under the filter doubles as the status line: the input is
-	// padded out to the full width, so there is no room beside it, and a line of
-	// its own would cost a row of worktrees.
-	b.WriteString(faint.Render(m.statusLine()))
-	b.WriteString("\n")
+	right := ""
+	if !m.loading {
+		count := strconv.Itoa(len(m.filtered))
+		if len(m.filtered) != len(m.allItems) {
+			count += "/" + strconv.Itoa(len(m.allItems))
+		}
+		right = m.th.Mute(count)
+	}
+	// The line under the masthead says how an in-flight or failed refresh is
+	// going: the filter is padded out to the full width, so there is no room
+	// beside it, and a line of its own would cost a row of worktrees.
+	status := m.statusLine()
+	if m.refreshErr != nil {
+		status = ui.Fg(ansicolor.Yellow, status)
+	} else {
+		status = m.th.Mute(status)
+	}
+	lines := []string{
+		m.th.Masthead("Worktrees", width, ""),
+		ui.Spread(status, right, width),
+		filterIndent + m.filterInput.View(),
+		"",
+	}
 
+	empty := func(text string) {
+		lines = append(lines, "", ui.Center(m.th.Mute(text), width))
+	}
 	switch {
 	case m.loading:
-		b.WriteString(faint.Render("  Loading worktrees..."))
-		b.WriteString("\n")
-		// Pad the remaining lines so the layout doesn't jump once loaded.
-		for i := 1; i < visible; i++ {
-			b.WriteString("\n")
-		}
-
+		empty("Loading worktrees...")
 	case len(m.allItems) == 0:
 		// Distinguished from a query that matched nothing: there is no worktree
 		// to find, so the filter is not what is hiding them.
-		b.WriteString(faint.Render("  No worktrees found"))
-		b.WriteString("\n")
-		for i := 1; i < visible; i++ {
-			b.WriteString("\n")
-		}
-
+		empty("No worktrees found")
+	case len(m.filtered) == 0:
+		empty("Nothing matches")
 	default:
 		end := min(m.offset+visible, len(m.filtered))
-
-		cursorStyle := lipgloss.NewStyle().Foreground(lipgloss.ANSIColor(2)).Bold(true)
-		matchStyle := lipgloss.NewStyle().Foreground(lipgloss.ANSIColor(1)).Bold(true)
+		matchStyle := lipgloss.NewStyle().Foreground(m.th.Colors.Accent).Bold(true)
 		normalStyle := lipgloss.NewStyle()
-
 		for i := m.offset; i < end; i++ {
-			b.WriteString(m.rowView(m.filtered[i], i == m.cursor, cursorStyle, matchStyle, normalStyle))
-			b.WriteString("\n")
-		}
-
-		for i := end - m.offset; i < visible; i++ {
-			b.WriteString("\n")
+			lines = append(lines, m.th.Row(m.rowView(m.filtered[i], matchStyle, normalStyle), i == m.cursor, width))
 		}
 	}
+	for len(lines) < headerLines+visible {
+		lines = append(lines, "")
+	}
+	lines = lines[:headerLines+visible]
+	lines = append(lines, m.th.Rule(width), m.th.Hints([]key.Binding{m.keys.Choose, m.keys.Refresh, m.keys.Quit}, width))
 
-	// The last row leaves a trailing newline behind. Dropping it keeps the
-	// frame exactly the height of the terminal.
-	v := tea.NewView(strings.TrimSuffix(b.String(), "\n"))
+	v := tea.NewView(strings.Join(lines, "\n"))
 	// Full window mode: the picker fills the terminal and hands the user's
 	// scrollback back untouched when it quits.
 	v.AltScreen = true
@@ -513,9 +549,9 @@ func (m WorktreeModel) statusLine() string {
 	var line string
 	switch {
 	case m.refreshing:
-		line = "  Refreshing worktrees..."
+		line = " Refreshing worktrees..."
 	case m.refreshErr != nil:
-		line = "  Refresh failed: " + m.refreshErr.Error()
+		line = " Refresh failed: " + m.refreshErr.Error()
 	default:
 		return ""
 	}
@@ -530,22 +566,18 @@ func (m WorktreeModel) statusLine() string {
 // numberGap separates the number column from the badge column.
 const numberGap = "  "
 
-// rowView renders one row: the number, the state badge, then the title, with
-// the query's matches highlighted in the number and the title.
-func (m WorktreeModel) rowView(row filteredWorktree, atCursor bool, cursorStyle, matchStyle, normalStyle lipgloss.Style) string {
-	prefix := "  "
-	if atCursor {
-		prefix = cursorStyle.Render("> ")
-	}
-
+// rowView renders one row's content, after the selection bar: the number,
+// the state badge, then the title, with the query's matches highlighted in
+// the number and the title.
+func (m WorktreeModel) rowView(row filteredWorktree, matchStyle, normalStyle lipgloss.Style) string {
 	number := padding(m.numberWidth-len(row.item.number)) +
 		highlightMatches(row.item.number, row.numberIndexes, matchStyle, normalStyle)
 	badge := stateBadge(row.item.entry.State, m.showIcons)
 
-	used := lipgloss.Width(prefix) + m.numberWidth + len(numberGap) + badgeCellWidth
+	used := rowIndent + m.numberWidth + len(numberGap) + badgeCellWidth
 	title, titleIndexes := m.clipTitle(row.item.entry.Title, row.titleIndexes, used)
 
-	return prefix + number + numberGap + badge +
+	return number + numberGap + badge +
 		highlightMatches(title, titleIndexes, matchStyle, normalStyle)
 }
 

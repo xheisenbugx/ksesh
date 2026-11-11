@@ -3,6 +3,7 @@ package seshcli
 import (
 	"github.com/spf13/cobra"
 
+	"github.com/xheisenbugx/ksesh/icon"
 	"github.com/xheisenbugx/ksesh/lister"
 	"github.com/xheisenbugx/ksesh/model"
 	"github.com/xheisenbugx/ksesh/picker"
@@ -45,6 +46,11 @@ func NewPickerCommand(base *BaseDeps) *cobra.Command {
 			}
 
 			var pickerOpts picker.PickerOptions
+			// Without a source flag, the picker lists everything and switches
+			// between the sources with a key, as contrib/ksesh-fzf does.
+			if !config && !kitty && !zoxide && !sessionfile {
+				pickerOpts.Sources = pickerSources(deps.Lister, listerOpts)
+			}
 			if cmd.Flags().Changed("icons") {
 				showIcons := true
 				pickerOpts.ShowIcons = &showIcons
@@ -87,7 +93,13 @@ func NewPickerCommand(base *BaseDeps) *cobra.Command {
 				pickerOpts.Query = &query
 			}
 
+			unzoom := func() {}
+			if zoom, _ := cmd.Flags().GetBool("zoom"); zoom {
+				unzoom = zoomTab(deps.Shell)
+			}
 			chosen, err := deps.Picker.Pick(fetchFunc, pickerOpts)
+			// Back to the tab's own layout before going anywhere.
+			unzoom()
 			if err != nil {
 				return err
 			}
@@ -120,6 +132,30 @@ func NewPickerCommand(base *BaseDeps) *cobra.Command {
 	cmd.Flags().Bool("no-alias-auto", false, "don't auto-connect when an alias is fully typed")
 	cmd.Flags().Bool("preview", false, "show a preview of the highlighted session beside the list")
 	cmd.Flags().Bool("no-preview", false, "hide the preview pane")
+	cmd.Flags().Bool("zoom", false, "show the tab's stack layout while picking, so an overlay fills the tab")
 
 	return cmd
+}
+
+// pickerSources are the lists the picker switches between, all of them first:
+// ^a everything, ^t kitty's sessions, ^g the configured ones, ^s the session
+// files and ^z zoxide's directories (^x kills or removes the selected row).
+func pickerSources(l lister.Lister, base lister.ListOptions) []picker.Source {
+	source := func(key, label, src string, set func(*lister.ListOptions)) picker.Source {
+		opts := base
+		set(&opts)
+		return picker.Source{
+			Key:   key,
+			Label: label,
+			Icon:  icon.Glyphs[src].Icon,
+			Fetch: func() (model.SeshSessions, error) { return l.List(opts) },
+		}
+	}
+	return []picker.Source{
+		source("ctrl+a", "all", "", func(*lister.ListOptions) {}),
+		source("ctrl+t", "kitty", "kitty", func(o *lister.ListOptions) { o.Kitty = true }),
+		source("ctrl+g", "configs", "config", func(o *lister.ListOptions) { o.Config = true }),
+		source("ctrl+s", "files", "sessionfile", func(o *lister.ListOptions) { o.SessionFile = true }),
+		source("ctrl+z", "zoxide", "zoxide", func(o *lister.ListOptions) { o.Zoxide = true }),
+	}
 }

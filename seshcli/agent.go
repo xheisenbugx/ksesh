@@ -44,6 +44,7 @@ with contrib/ksesh_agents.py, in kitty's tab bar and desktop notifications.`,
 		newAgentSendCommand(base),
 		newAgentPathCommand(base),
 		newAgentDiffCommand(base),
+		newAgentPickCommand(base),
 		newAgentInstallCommand(),
 		newAgentUninstallCommand(),
 	)

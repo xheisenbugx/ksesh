@@ -60,9 +60,9 @@ func (m Model) keyInput(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 // matches reports whether a thread has every word of the filter in its
 // title, session or branch, in any case.
 func (m Model) matches(a *model.Agent) bool {
-	text := title(a) + " " + a.Session
-	if info, ok := m.branchOf(a); ok {
-		text += " " + info.status.Branch
+	text := m.searchText(a)
+	if m.opts.Picker {
+		return fuzzy(text, m.filter)
 	}
 	text = strings.ToLower(text)
 	for _, word := range strings.Fields(strings.ToLower(m.filter)) {
@@ -71,6 +71,16 @@ func (m Model) matches(a *model.Agent) bool {
 		}
 	}
 	return true
+}
+
+// searchText is what a filter looks in: a thread's title, session and
+// branch.
+func (m Model) searchText(a *model.Agent) string {
+	text := title(a) + " " + a.Session
+	if info, ok := m.branchOf(a); ok {
+		text += " " + info.status.Branch
+	}
+	return text
 }
 
 // submit does what was typed in answer to an input mode's question.

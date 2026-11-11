@@ -47,23 +47,25 @@ action_alias ksesh         launch --type=background --allow-remote-control --env
 action_alias ksesh_overlay launch --type=overlay --cwd=current --env PATH={{.Path}}
 
 # cmd+p: the session picker (^a all ^t kitty ^g configs ^s session files
-# ^x zoxide ^d kill ^f find). cmd+shift+p: back to the previous session.
+# ^z zoxide ^x kill). cmd+shift+p: back to the previous session.
 # cmd+shift+r: rename the session.
 map super+shift+p goto_session -1
 map super+shift+r ksesh_overlay sh -c 'printf "Rename session to: "; read -r name && [ -n "$name" ] && exec {{.Ksesh}} rename --to "$name"'
 
 # Agents: cmd+j goes to the agent that has waited on you the longest (again
 # for the next one), cmd+shift+j back to the previous one, cmd+a a picker over
-# every agent with its screen as preview.
+# every thread with its screen (or diff) as preview.
 map super+j       ksesh agent next
 map super+shift+j ksesh agent last
 
 # Pickers are full-window overlays, too big for the sidebar: pressed in it,
 # they open over the window beside it instead.
-map --when-focus-on 'not var:ksesh_role=sidebar' super+p ksesh_overlay {{.Dir}}/ksesh-fzf
-map --when-focus-on var:ksesh_role=sidebar       super+p ksesh sidebar overlay -- {{.Dir}}/ksesh-fzf
-map --when-focus-on 'not var:ksesh_role=sidebar' super+a ksesh_overlay {{.Dir}}/ksesh-agents-fzf
-map --when-focus-on var:ksesh_role=sidebar       super+a ksesh sidebar overlay -- {{.Dir}}/ksesh-agents-fzf
+# The fzf pickers ksesh had before, ksesh-fzf and ksesh-agents-fzf, are
+# installed next to this file: bind them in ksesh-local.conf to keep them.
+map --when-focus-on 'not var:ksesh_role=sidebar' super+p ksesh_overlay {{.Ksesh}} picker --icons --preview --zoom
+map --when-focus-on var:ksesh_role=sidebar       super+p ksesh sidebar overlay -- {{.Ksesh}} picker --icons --preview --zoom
+map --when-focus-on 'not var:ksesh_role=sidebar' super+a ksesh_overlay {{.Ksesh}} agent pick --zoom
+map --when-focus-on var:ksesh_role=sidebar       super+a ksesh sidebar overlay -- {{.Ksesh}} agent pick --zoom
 
 # Threads: cmd+b shows or hides the sidebar in every tab, cmd+shift+b goes
 # into the tab's sidebar and back out. cmd+ctrl acts on the thread in the
