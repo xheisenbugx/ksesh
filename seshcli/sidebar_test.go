@@ -1,6 +1,7 @@
 package seshcli
 
 import (
+	"errors"
 	"testing"
 	"time"
 
@@ -22,24 +23,24 @@ func TestCommandError(t *testing.T) {
 func TestSidebarReposSharePullRequestsThroughTheirCache(t *testing.T) {
 	dir := t.TempDir()
 	gh := github.NewMockGithub(t)
-	gh.EXPECT().PrState("/w/login").Return(model.PullRequestState{Number: 12, State: model.PRMerged}, true, nil).Once()
-	gh.EXPECT().PrState("/w/new").Return(model.PullRequestState{}, false, nil).Once()
+	gh.EXPECT().PrState("/w/login", "feat/login").Return(model.PullRequestState{Number: 12, State: model.PRMerged}, true, nil).Once()
+	gh.EXPECT().PrState("/w/new", "new").Return(model.PullRequestState{}, false, nil).Once()
 	repos := func() sidebarRepos {
 		return sidebarRepos{gh: gh, prs: cache.NewNamespaceInDir[model.PullRequestState](dir, prCacheName, prCacheVersion, prCacheTTL)}
 	}
 
-	pr, found, err := repos().PullRequest("/w/login", "feat/login")
+	pr, found, err := repos().PullRequest("/w/login", "feat/login", false)
 	require.NoError(t, err)
 	assert.True(t, found)
 	assert.Equal(t, 12, pr.Number)
-	_, found, _ = repos().PullRequest("/w/new", "new")
+	_, found, _ = repos().PullRequest("/w/new", "new", false)
 	assert.False(t, found)
 
 	// Another sidebar: gh isn't asked again.
-	pr, found, _ = repos().PullRequest("/w/login", "feat/login")
+	pr, found, _ = repos().PullRequest("/w/login", "feat/login", false)
 	assert.True(t, found)
 	assert.Equal(t, model.PRMerged, pr.State)
-	_, found, _ = repos().PullRequest("/w/new", "new")
+	_, found, _ = repos().PullRequest("/w/new", "new", false)
 	assert.False(t, found, "no pull request is remembered too")
 }
 
@@ -82,4 +83,37 @@ func TestRunKsesh(t *testing.T) {
 	require.NoError(t, runKsesh([]string{"/bin/sh", "-c"})(dir, `test "$(pwd -P)" = "$(cd "$0" && pwd -P)"`, dir), "runs in dir")
 	err := runKsesh([]string{"/bin/sh", "-c"})(dir, "echo 'Error: it broke' >&2; exit 1")
 	assert.EqualError(t, err, "it broke")
+}
+
+func TestAFreshLookForAPullRequestAsksGitHub(t *testing.T) {
+	dir := t.TempDir()
+	gh := github.NewMockGithub(t)
+	gh.EXPECT().PrState("/w/new", "new").Return(model.PullRequestState{}, false, nil).Once()
+	gh.EXPECT().PrState("/w/new", "new").Return(model.PullRequestState{Number: 7, State: model.PROpen}, true, nil).Once()
+	repos := sidebarRepos{gh: gh, prs: cache.NewNamespaceInDir[model.PullRequestState](dir, prCacheName, prCacheVersion, prCacheTTL)}
+
+	_, found, _ := repos.PullRequest("/w/new", "new", false)
+	assert.False(t, found)
+	_, found, _ = repos.PullRequest("/w/new", "new", false)
+	assert.False(t, found, "cached")
+	pr, found, _ := repos.PullRequest("/w/new", "new", true)
+	assert.True(t, found, "past the cache when asked to")
+	assert.Equal(t, 7, pr.Number)
+	pr, found, _ = repos.PullRequest("/w/new", "new", false)
+	assert.True(t, found, "and the cache learns it")
+	assert.Equal(t, 7, pr.Number)
+}
+
+func TestAFailedLookForAPullRequestIsntCached(t *testing.T) {
+	dir := t.TempDir()
+	gh := github.NewMockGithub(t)
+	gh.EXPECT().PrState("/w/x", "x").Return(model.PullRequestState{}, false, errors.New("offline")).Once()
+	gh.EXPECT().PrState("/w/x", "x").Return(model.PullRequestState{Number: 2, State: model.PROpen}, true, nil).Once()
+	repos := sidebarRepos{gh: gh, prs: cache.NewNamespaceInDir[model.PullRequestState](dir, prCacheName, prCacheVersion, prCacheTTL)}
+
+	_, _, err := repos.PullRequest("/w/x", "x", false)
+	assert.Error(t, err)
+	_, found, err := repos.PullRequest("/w/x", "x", false)
+	require.NoError(t, err)
+	assert.True(t, found, "asked again, not remembered as none")
 }

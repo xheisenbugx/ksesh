@@ -6,10 +6,12 @@ type BranchStatus struct {
 	// Branch is empty when HEAD is detached.
 	Branch string `json:"branch,omitempty"`
 	// Base is what Ahead and Behind count against, empty on the base branch
-	// itself.
-	Base   string `json:"base,omitempty"`
-	Ahead  int    `json:"ahead,omitempty"`
-	Behind int    `json:"behind,omitempty"`
+	// itself, and when git couldn't count them.
+	Base string `json:"base,omitempty"`
+	// OnBase is set on the base branch itself, which has no pull request.
+	OnBase bool `json:"on_base,omitempty"`
+	Ahead  int  `json:"ahead,omitempty"`
+	Behind int  `json:"behind,omitempty"`
 	// Worktree is the root of the linked worktree the directory is in, empty
 	// in the repo's main one.
 	Worktree string `json:"worktree,omitempty"`

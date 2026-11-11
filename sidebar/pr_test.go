@@ -1,6 +1,7 @@
 package sidebar
 
 import (
+	"errors"
 	"strings"
 	"testing"
 
@@ -30,10 +31,10 @@ func withPR(t *testing.T) (Model, *[]string) {
 		}
 	}
 	m.branches["/w/2"] = &branchInfo{
-		ok:     true,
-		status: model.BranchStatus{Branch: "docs", Base: "origin/main"},
-		hasPR:  true,
-		pr:     model.PullRequestState{Number: 12, State: model.PROpen, URL: prURL},
+		ok:       true,
+		status:   model.BranchStatus{Branch: "docs", Base: "origin/main"},
+		prBranch: "docs", hasPR: true,
+		pr: model.PullRequestState{Number: 12, State: model.PROpen, URL: prURL},
 	}
 	m, _ = press(t, m, "k")
 	a, ok := m.selectedAgent()
@@ -100,4 +101,68 @@ func TestClickingThePullRequestOpensIt(t *testing.T) {
 		cmd()
 	}
 	assert.Len(t, *opened, 1, "anywhere else on the line goes to the thread")
+}
+
+// lookupModel is the sidebar on thread 2, in /w/2, with nothing known of
+// its branch yet, as right after a sidebar or picker starts.
+func lookupModel(t *testing.T) (Model, *MockRepos, *[]string) {
+	t.Helper()
+	clock := now
+	m, repos := repoModel(t, &clock)
+	var opened []string
+	m.opts.OpenURL = func(url string) error {
+		opened = append(opened, url)
+		return nil
+	}
+	m, _ = update(m, loadedMsg{agents: inRepos(fixtures()), current: 1, shown: false, focused: true})
+	m, _ = press(t, m, "k")
+	a, ok := m.selectedAgent()
+	require.True(t, ok)
+	require.Equal(t, 2, a.WindowID)
+	return m, repos, &opened
+}
+
+func TestPLooksForAPullRequestItDoesntKnowYet(t *testing.T) {
+	m, repos, opened := lookupModel(t)
+	repos.EXPECT().BranchStatus("/w/2").Return(model.BranchStatus{Branch: "docs", Base: "origin/main"}, nil).Once()
+	repos.EXPECT().PullRequest("/w/2", "docs", true).Return(model.PullRequestState{Number: 12, State: model.PROpen, URL: prURL}, true, nil).Once()
+
+	m, cmd := press(t, m, "P")
+	assert.Contains(t, m.flash, "looking for its pull request")
+	require.NotNil(t, cmd)
+	m, cmd = update(m, cmd())
+	for _, msg := range runBatch(cmd) {
+		m, _ = update(m, msg)
+	}
+	assert.Equal(t, []string{prURL}, *opened, "asked GitHub there and then, past the cache")
+	assert.Contains(t, m.flash, "opened #12")
+	_, ok := m.pullRequest(m.agents[1])
+	assert.True(t, ok, "and remembers it")
+}
+
+func TestPSaysWhyThereIsNoPullRequest(t *testing.T) {
+	cases := []struct {
+		name   string
+		status model.BranchStatus
+		prErr  error
+		says   string
+	}{
+		{"base", model.BranchStatus{Branch: "main", OnBase: true}, nil, "2 is on main, the base branch"},
+		{"detached", model.BranchStatus{}, nil, "detached HEAD"},
+		{"none", model.BranchStatus{Branch: "docs"}, nil, "no pull request for docs"},
+		{"gh failed", model.BranchStatus{Branch: "docs"}, errors.New("gh: error connecting to api.github.com"), "couldn't ask GitHub: gh: error connecting"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			m, repos, opened := lookupModel(t)
+			repos.EXPECT().BranchStatus("/w/2").Return(c.status, nil).Once()
+			if c.status.Branch != "" && !c.status.OnBase {
+				repos.EXPECT().PullRequest("/w/2", "docs", true).Return(model.PullRequestState{}, false, c.prErr).Once()
+			}
+			m, cmd := press(t, m, "P")
+			m, _ = update(m, cmd())
+			assert.Contains(t, m.flash, c.says)
+			assert.Empty(t, *opened)
+		})
+	}
 }

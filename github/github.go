@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"regexp"
 	"strconv"
+	"strings"
 
 	"github.com/xheisenbugx/ksesh/git"
 	"github.com/xheisenbugx/ksesh/model"
@@ -41,7 +42,7 @@ type Github interface {
 	// PrState returns the state of the pull request for the branch checked
 	// out in dir, merged and closed ones included. found is false (with nil
 	// error) when the branch has none.
-	PrState(dir string) (pr model.PullRequestState, found bool, err error)
+	PrState(dir, branch string) (pr model.PullRequestState, found bool, err error)
 	// PrCheckout runs `gh pr checkout` inside dir (a worktree).
 	PrCheckout(dir string, repo string, number int) (string, error)
 	// Issue returns the GitHub issue for the branch checked out at path.
@@ -113,11 +114,21 @@ func (g *RealGithub) PrURL(dir string) (string, bool, error) {
 	return out, true, nil
 }
 
-func (g *RealGithub) PrState(dir string) (model.PullRequestState, bool, error) {
-	// Without a number, gh finds the branch's pull request, the open one
-	// first, then a merged or closed one.
-	out, err := g.shell.CmdInDir(dir, "gh", "pr", "view", "--json", "number,state,isDraft,url")
-	if err != nil || out == "" {
+// PrState is the pull request of branch, in the repo of dir: the open one
+// first, then a merged or closed one. Not finding one isn't an error; gh
+// failing (offline, signed out, rate limited) is, so that it isn't taken for
+// a branch without one.
+func (g *RealGithub) PrState(dir, branch string) (model.PullRequestState, bool, error) {
+	// Named, rather than gh's current branch: the answer is about the branch
+	// asked about even if another was checked out since.
+	out, err := g.shell.CmdInDir(dir, "gh", "pr", "view", branch, "--json", "number,state,isDraft,url")
+	if err != nil {
+		if strings.Contains(err.Error(), "no pull requests found") {
+			return model.PullRequestState{}, false, nil
+		}
+		return model.PullRequestState{}, false, err
+	}
+	if out == "" {
 		return model.PullRequestState{}, false, nil
 	}
 	var raw struct {

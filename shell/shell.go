@@ -81,6 +81,11 @@ func (c *RealShell) CmdInDir(dir string, cmd string, args ...string) (string, er
 	command.Stdout = &stdout
 	command.Stderr = &stderr
 	if err := command.Run(); err != nil {
+		// What the command said is the reason it failed, which callers may
+		// need to tell one failure from another.
+		if msg := strings.TrimSpace(stderr.String()); msg != "" {
+			return "", fmt.Errorf("%s: %w: %s", cmd, err, msg)
+		}
 		return "", err
 	}
 	return strings.TrimSuffix(stdout.String(), "\n"), nil

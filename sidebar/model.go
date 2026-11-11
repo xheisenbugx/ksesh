@@ -450,6 +450,8 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 		return m, tea.Batch(cmds...)
+	case prLookupMsg:
+		return m.foundPR(msg)
 	case branchMsg:
 		m.learn(msg)
 		if cmds := m.settleMerged(); len(cmds) > 0 {
