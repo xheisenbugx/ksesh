@@ -109,6 +109,10 @@ func (m Model) typeQuery(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 	m.query, cmd = m.query.Update(msg)
 	if f := strings.TrimSpace(m.query.Value()); f != m.filter {
+		if m.filter == "" {
+			// A search looks in every shelf.
+			m.searched = map[agent.Section]bool{agent.SectionWorking: true, agent.Snoozed: true, agent.Settled: true}
+		}
 		m.filter = f
 		m.offset = 0
 		m.firstMatch()

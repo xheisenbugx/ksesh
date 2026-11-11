@@ -60,8 +60,13 @@ Needs listen_on in kitty.conf, as the sidebar does.`,
 			if p := os.Getenv("PATH"); p != "" {
 				env = append(env, "PATH="+p)
 			}
+			shelves, err := pickerShelves(deps.Config)
+			if err != nil {
+				return err
+			}
 			opts := sidebar.Options{
 				Picker:       true,
+				OpenShelves:  shelves,
 				Backend:      deps.Threads,
 				Self:         self,
 				ThreadOpts:   threadOpts(deps.Config),
@@ -88,6 +93,25 @@ Needs listen_on in kitty.conf, as the sidebar does.`,
 	}
 	cmd.Flags().Bool("zoom", false, "show the tab's stack layout while picking, so an overlay fills the tab")
 	return cmd
+}
+
+// pickerShelves are the shelves [picker] open_shelves opens the picker with:
+// Working alone when it isn't set.
+func pickerShelves(cfg model.Config) ([]agent.Section, error) {
+	names := []string{string(agent.SectionWorking)}
+	if cfg.Picker.OpenShelves != nil {
+		names = *cfg.Picker.OpenShelves
+	}
+	shelves := []agent.Section{}
+	for _, name := range names {
+		switch s := agent.Section(strings.ToLower(strings.TrimSpace(name))); s {
+		case agent.SectionWorking, agent.Snoozed, agent.Settled:
+			shelves = append(shelves, s)
+		default:
+			return nil, fmt.Errorf("[picker] open_shelves: no shelf %q (working, snoozed or settled)", name)
+		}
+	}
+	return shelves, nil
 }
 
 // agentPreview draws a thread for the picker's preview: what 'ksesh agent

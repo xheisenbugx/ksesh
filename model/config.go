@@ -83,6 +83,16 @@ type (
 		Frecency        FrecencyConfig `toml:"frecency"`
 		TUI             TUIConfig      `toml:"tui"`
 		Sidebar         SidebarConfig  `toml:"sidebar"`
+		Picker          PickerConfig   `toml:"picker"`
+	}
+
+	// PickerConfig is [picker]: the agent picker (`ksesh agent pick`).
+	PickerConfig struct {
+		// OpenShelves are the shelves the picker opens with: any of
+		// "working", "snoozed" and "settled". Unset means only "working";
+		// an empty list keeps them all closed. Typing a filter opens them
+		// all, so a search finds every thread.
+		OpenShelves *[]string `toml:"open_shelves"`
 	}
 
 	// SidebarConfig is [sidebar]: the thread sidebar docked to kitty's tabs

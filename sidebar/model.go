@@ -87,6 +87,9 @@ type Options struct {
 	// selected thread's screen (or its diff) shows beside the list, and
 	// going to a thread quits.
 	Picker bool
+	// OpenShelves are the shelves the picker opens with. Typing a filter
+	// opens every shelf until the filter is cleared.
+	OpenShelves []agent.Section
 	// Preview draws a thread for the picker's preview pane, width columns
 	// wide: its screen, or with diff, its review. Nil shows none.
 	Preview func(a *model.Agent, diff bool, width int) (Preview, error)
@@ -216,8 +219,9 @@ type Model struct {
 	previewFor    string
 	previewHeader []string
 	// opened are the shelves open in the picker, which leaves the sidebars'
-	// own alone.
-	opened map[agent.Section]bool
+	// own alone; searched those open while it filters, every one to start
+	// with.
+	opened, searched map[agent.Section]bool
 }
 
 func New(opts Options) Model {
@@ -237,7 +241,10 @@ func New(opts Options) Model {
 		m.preview = viewport.New()
 		m.previewOn = opts.Preview != nil
 		m.focused = true
-		m.opened = map[agent.Section]bool{agent.SectionWorking: true, agent.Snoozed: true, agent.Settled: true}
+		m.opened = map[agent.Section]bool{}
+		for _, s := range opts.OpenShelves {
+			m.opened[s] = true
+		}
 	}
 	m.styleInputs()
 	return m
@@ -550,7 +557,10 @@ func (m Model) board() agent.Board {
 
 // expanded is which shelves are open: the sidebars', or the picker's own.
 func (m Model) expanded() map[agent.Section]bool {
-	if m.opts.Picker {
+	switch {
+	case m.opts.Picker && m.filter != "":
+		return m.searched
+	case m.opts.Picker:
 		return m.opened
 	}
 	return m.state.Expanded
@@ -943,8 +953,13 @@ func (m Model) activate() (tea.Model, tea.Cmd) {
 	case rowHeader:
 		open := !m.expanded()[r.section]
 		if m.opts.Picker {
-			m.opened = maps.Clone(m.opened)
-			m.opened[r.section] = open
+			if m.filter != "" {
+				m.searched = maps.Clone(m.searched)
+				m.searched[r.section] = open
+			} else {
+				m.opened = maps.Clone(m.opened)
+				m.opened[r.section] = open
+			}
 			if !open && r.section == agent.Settled {
 				m.allSettled = false
 			}
